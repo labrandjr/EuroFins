@@ -1,0 +1,1763 @@
+#INCLUDE "PROTHEUS.CH"
+
+
+/*/{Protheus.doc} ExpenseOn
+
+Classe para realizar a tratamentos de integracao com a ExpenseOn
+
+@type class
+@author	Luciano.braga/sergio IP
+@since	12/05/2022
+/*/
+
+Class ExpenseOn
+
+	Private Data cUrl               as Character
+	Private Data cPathToken 		as Character
+	Private Data cLogin 			as Character
+	Private Data cPass 	    		as Character
+	Private Data cToken     		as Character
+	Private Data cValid     		as Character
+	Private Data cStatusCode		as Character
+	Private Data cMensagemErro		As Character
+	Private Data lAmbProd			as Logical
+	Private Data nTimeOut 			as Numeric
+	Private Data aHeaderRequisicao	as Array
+	Private Data aRet				as Array
+	Private Data ojRetorno
+
+	Private Method ProcRequest()
+	Private Method Token()
+
+	Public Method New() Constructor
+	Public Method GetErro()
+	Public Method GetRetornoApi()
+	Public Method GetRetornoArray()
+	Public Method GetStatusCode()
+	Public Method GrvUser()
+	Public Method GrvCategoria()
+	Public Method GrvCCusto()
+	Public Method GetAdiantamentos()
+	Public Method GrvAdiantamentos()
+	Public Method GetTitulos()
+	Public Method GrvTitulos()
+	Public Method ChkFilial()
+	Public Method PostChangPA()
+	Public Method PostChangDP()
+	Public Method PostChangPG()
+	Public Method GetReportPayStatus()
+
+EndClass
+
+
+/*/{Protheus.doc} ExpenseOn::New
+Método Construtor da Classe ExpenseOn
+@type method
+@author Luciano.braga
+@since 12/05/2022
+/*/
+
+Method New() CLASS ExpenseOn
+
+	::cUrl				:= Alltrim(ZZH->ZZH_URL) 	//IIf(::lAmbProd, "https://app.expenseon.com", "https://qa.expenseon.com" )
+	::cLogin 	    	:= Alltrim(ZZH->ZZH_LOGIN) 	//GetMV("EF_EXPEPRD",,"integrador@eurofins.com.br")
+	::cPass 	    	:= Alltrim(ZZH->ZZH_SENHA) 	//GetMV("EF_EXPEPAS",,"expenseon123")
+	::cPathToken    	:= "/api/login"
+	::cMensagemErro		:= ""
+	::cToken        	:= Alltrim(ZZH->ZZH_TOKEN)
+	::cValid        	:= Alltrim(ZZH->ZZH_VALID)
+	::cStatusCode		:= ""
+
+	::aHeaderRequisicao	:= {}
+	::aRet				:= {}
+
+	::nTimeOut			:= 15
+
+	::ojRetorno			:= Nil
+
+Return self
+
+
+
+/*/{Protheus.doc} ExpenseOn::GrvUser
+Metodo de criacao de novo usuario
+@type method
+@author Luciano.braga
+@since 12/05/2022
+/*/
+Method GrvUser(aFornec , cFilPro, lSucess) CLASS ExpenseOn
+
+	Local lRet      := .F.
+	Local aUsers    := {}
+	Local aRetUsers := {}
+	Local nX        := 0
+	Local nR        := 0
+	Local nLenFor   := 0
+	Local ojUser    := Nil
+	Local ojRequest := Nil
+	local cProfile  := "" as character
+	local cCargo    := "" as character
+	DEFAULT aFornec := {}
+	default lSucess := .T.
+
+	nLenFor := Len(aFornec)
+	If nLenFor == 0
+		::cMensagemErro := 'Para geração de usuarios no ExpenseOn, informe codigo+loja de fornecedor.'
+		Return .F.
+	EndIf
+
+	For nX:=1 to nLenFor
+		//					1-Filial	2-Cod			3-Loja		  4-lRet 5-Msg   6-recno
+		AAdd(::aRet, {aFornec[nX,1], aFornec[nX,2], aFornec[nX,3], "", "" , aFornec[nX,4], cFilPro	 } )
+		nR := Len(::aRet)
+
+		SA2->(DbSetOrder(1)) //A2_FILIAL+A2_COD+A2_LOJA
+		If !SA2->(DbSeek(aFornec[nX,1]+aFornec[nX,2]+aFornec[nX,3]))
+			::aRet[nR,4] := "ERRO"
+			::aRet[nR,5] := 'Codigo de fornecedor informado ['+aFornec[nX,1]+aFornec[nX,2]+aFornec[nX,3]+'], não foi encontrado.'
+		Else
+
+			If SA2->(FieldPos("A2_XPERFIL")) > 0
+				If !Empty(SA2->A2_XPERFIL)
+					cProfile := X3Combo("A2_XPERFIL", SA2->A2_XPERFIL)
+				Else
+					cProfile := "Usuario"
+				EndIf
+			Else
+				cProfile := "Usuario"
+			EndIf
+
+			If SA2->(FieldPos("A2_XCARGO")) > 0
+				If !Empty(SA2->A2_XCARGO)
+					cCargo := X3Combo("A2_XCARGO", SA2->A2_XCARGO)
+				Else
+					cCargo := ""
+				EndIf
+			Else
+				cCargo := ""
+			EndIf
+
+			ojUser 	:= JsonObject():New()
+			ojUser['financeSystemId']	:= SA2->(A2_FILIAL+A2_COD+A2_LOJA)
+			ojUser['name']				:= Alltrim(SA2->A2_NOME)
+			ojUser['email']				:= Alltrim(SA2->A2_EMAIL)
+			ojUser['profile']			:= cProfile					    //Perfil do usuário Administrador, Financeiro, Aprovador e Usuario
+			ojUser['subsidiary']		:= FwFilialName( , , 2 )		//Filial que o usuário pertence
+			ojUser['refSubsidiary']		:= CFilAnt						//SA2->A2_FILIAL		//Código da filial que o usuário pertence no ERP
+			ojUser['subsidiaryTaxId']	:= SM0->M0_CGC					//CNPJ da filial que o usuário pertence
+			ojUser['area']				:= ""							//Área que o usuário pertence
+			ojUser['refArea']			:= ""							//Código da área que o usuário pertence no ERP
+			ojUser['jobPosition']		:= cCargo   					//Cargo que o usuário exerce na empresa
+			ojUser['refJobPosition']	:= ""							//	Código do cargo que o usuário pertence no ERP
+			ojUser['isActive']			:= IIF(SA2->A2_MSBLQL == '1',.F.,.T.)//	Define se o usuário está ativo ou inativo
+			ojUser['documentId']		:= Alltrim(SA2->A2_CGC)			//Documento CPF do usuário
+			ojUser['refManager']		:= Alltrim(SA2->A2_NOMRESP)    	//Referência do superior do usuário (gerente/supervisor)
+			ojUser['refCostCenter']		:= ""							//Referência do centro de custo padrão do usuário
+			ojUser['customField1']		:= ""							//Campo Customizado 1
+			ojUser['customField2']		:= ""							//Campo Customizado 2
+			ojUser['customField3']		:= ""							//Campo Customizado 3
+			ojUser['customField4']		:= ""							//Campo Customizado 4
+			ojUser['customField5']		:= ""							//Campo Customizado 5
+			ojUser['customField6']		:= ""							//Campo Customizado 6
+			ojUser['customField7']		:= ""							//Campo Customizado 7
+			ojUser['customField8']		:= ""							//Campo Customizado 8
+			ojUser['customField9']		:= ""							//Campo Customizado 9
+			ojUser['customField10']		:= ""							//Campo Customizado 10
+			AAdd(aUsers, ojUser)
+			FreeObj(ojUser)
+		EndIf
+	Next nX
+
+	If Len(aUsers) > 0
+		ojRequest 	:= JsonObject():New()
+		ojRequest['users'] := aUsers
+
+		lRet := ::ProcRequest("/api/integration/user", "POST", ojRequest:toJson() )
+		If !lRet
+			For nX:=1 to nLenFor
+				If Empty(::aRet[nX,5])
+					::aRet[nX,4] := "ERRO"
+					::aRet[nX,5] := ::cMensagemErro
+				EndIF
+			Next nX
+			lSucess := .F.
+		else
+			If !::ojRetorno['success']
+				For nX:=1 to nLenFor
+					If Empty(::aRet[nX,5])
+						::aRet[nX,4] := "ERRO"
+						::aRet[nX,5] := "Cod: "+::ojRetorno['error_code']+": "+::ojRetorno['error_type']+" - "+::ojRetorno['error_description']
+					EndIF
+				Next nX
+				lSucess := .F.
+			Else
+				aRetUsers := ::ojRetorno['data',"users"]
+				For nX:=1 to Len(aRetUsers)
+					cCod	:= aRetUsers[nX]['financeSystemId']
+					nPRet	:= aScan( ::aRet , {|x| Alltrim(x[1]+x[2]+x[3]) == Alltrim(cCod) } )
+					If nPRet > 0
+						::aRet[nPRet,4] := "SUCESSO"
+						::aRet[nPRet,5] := "Cod: "+Alltrim(AlltoChar(aRetUsers[nX]['idUser']))
+
+						If lSucess
+							dbSelectArea("SA2")
+							SA2->(dbGoto(::aRet[nPRet,6]))
+							SA2->(Reclock("SA2",.F.))
+							SA2->A2_MSEXP := DTOS(date())
+							SA2->(Msunlock())
+						EndIf
+					EndIf
+				Next nX
+			EndIf
+		EndIf
+	EndIf
+
+Return(.T.)
+
+
+
+/*/{Protheus.doc} ExpenseOn::GetErro
+Metodo para retornar o erro
+@type method
+@author Luciano.braga
+@since 12/05/2022
+/*/
+Method GetErro() CLASS ExpenseOn
+
+Return(::cMensagemErro)
+
+/*/{Protheus.doc} ExpenseOn::GetRetornoApi
+Metodo para retornar o Json de Retorno da API
+@type method
+@author Luciano.braga
+@since 12/05/2022
+/*/
+Method GetRetornoApi() CLASS ExpenseOn
+
+Return(::ojRetorno)
+
+
+/*/{Protheus.doc} ExpenseOn::GetRetornoArray
+Metodo para retornar a Array recebido com as criticas
+@type method
+@author Luciano.braga
+@since 132/05/2022
+/*/
+Method GetRetornoArray() CLASS ExpenseOn
+
+Return(::aRet)
+
+
+/*/{Protheus.doc} ExpenseOn::GetStatusCode
+Metodo para retornar o statusCode da Requisicao
+@type method
+@author Luciano.braga
+@since 12/05/2022
+/*/
+Method GetStatusCode() CLASS ExpenseOn
+
+Return(::cStatusCode)
+
+
+
+/*/{Protheus.doc} ExpenseOn::ProcRequest
+Processa requisição via API
+@type method
+@author Luciano.braga
+@since 12/05/2022
+@param cPathConsulta, character, path da requisicao
+@param cMetodo, character, Metido/Verbo a ser considerado
+@param cParametros, character, parametros a serem enviados
+/*/
+
+Method ProcRequest(cPathConsulta, cMetodo, cParametros, lUneHostPath) CLASS ExpenseOn
+
+	Local lRetorno            := .T.
+	Local oRestCliente        := Nil
+	Local nInicio             := 0
+	Local nRetentativaTimeout := 0
+	Local cHost               := ::cUrl
+    Local cJson               := "" // alterado por Leandro Cesar - 21/03/2023
+	DEFAULT lUneHostPath      := .F.
+
+	If lUneHostPath
+		cHost           := cHost + cPathConsulta
+		cPathConsulta   := ""
+	EndIf
+	oRestCliente 		:= FWRest():New(cHost)
+
+	oRestCliente:nTimeOut := ::nTimeOut
+
+	// Recupera o token
+	If Empty(::cToken)
+		if !::Token()
+			FreeObj(oRestCliente)
+			Return(.F.)
+		endif
+	Else
+		// Verifica se o token já expirou
+		if StrTran(SubStr(::cValid,1,10),"-","") <> Dtos(dDataBase) .OR. Time() > SubStr(::cValid,12,8)
+			::cToken := ""
+			::cValid := ""
+			if !::Token()
+				FreeObj(oRestCliente)
+				Return(.F.)
+			endif
+		endif
+	endif
+
+	// Tenta novamente buscar o Token
+	if Empty(::cToken)
+		if !::Token()
+			FreeObj(oRestCliente)
+			Return(.F.)
+		endif
+
+		// Se nao conseguiu, retorna
+		if Empty(::cToken)
+			::cMensagemErro := "Não foi possível recuperar o token (2). Tente novamente. - Erro:"+;
+				Alltrim(AlltoChar(oRestCliente:GetLastError()))
+			FreeObj(oRestCliente)
+			Return(.F.)
+		endif
+	endif
+
+	// Monta o Header
+	Aadd(::aHeaderRequisicao,'Ticket: '+::cToken)
+
+	nInicio = Seconds()
+
+	if cMetodo == "POST"
+		aadd(::aHeaderRequisicao,'Content-Type: application/json')
+		oRestCliente:setPath(cPathConsulta)
+		if !Empty(cParametros)
+			oRestCliente:SetPostParams(cParametros)
+		endif
+		oRestCliente:Post(::aHeaderRequisicao)
+
+	elseif cMetodo == "PUT"
+		aadd(::aHeaderRequisicao,'Content-Type: application/json')
+		oRestCliente:setPath(cPathConsulta)
+		oRestCliente:put(::aHeaderRequisicao,cParametros)
+
+	elseif cMetodo == "GET"
+		//aadd(::aHeaderRequisicao,'Content-Type: application/x-www-form-urlencoded')
+		aadd(::aHeaderRequisicao,'Content-Type: application/json; charset=UTF-8')
+		oRestCliente:setPath(cPathConsulta+cParametros)
+		oRestCliente:Get(::aHeaderRequisicao)
+	endif
+
+	nRetentativaTimeout := Seconds() - nInicio
+
+	if ValType(oRestCliente:GetResult()) <> "U"
+		cJson := oRestCliente:GetResult()
+	endif
+
+	If !empty(cJson)
+		::ojRetorno := JsonObject():New()
+		cMsgJso := ::ojRetorno:fromJson(cJson)
+		If !empty(cMsgJso)
+			::cMensagemErro := 'Json parser error'
+			lRetorno := .F.
+		EndIf
+	else
+		::cMensagemErro := 'Não foi possível obter a resposta da solicitação. Tente novamente'
+		lRetorno := .F.
+	EndIf
+
+	::cStatusCode := oRestCliente:oResponseh:cStatusCode
+
+	FreeObj(oRestCliente)
+
+Return lRetorno
+
+
+/*/{Protheus.doc} ExpenseOn::Token
+Tratamento de token de autorizacao na ExpenseOn
+@type method
+@author Luciano.braga
+@since 12/05/2022
+/*/
+Method Token() CLASS ExpenseOn
+
+	Local aHeader       := {}
+
+	Local ojBody        := Nil
+	Local oRestCliente  := Nil
+	Local ojToken       := Nil
+
+	Local cJson         := ""
+
+	Local lRetorno      := .T.
+	Local cHora         := "00:00:00"
+
+	// Cria o objeto da classe FWRest
+	oRestCliente := FWRest():New(::cUrl)
+	oRestCliente:SetPath(::cPathToken)
+
+	If !ValType(oRestCliente) == "O"
+		::cMensagemErro := "Não foi possível encontrar a URL de Token. Tente novamente"
+		lRetorno := .F.
+	Endif
+
+	oRestCliente:nTimeOut := ::nTimeOut
+
+	if lRetorno
+
+		ojBody := JsonObject():New()
+		ojBody["email"] := ::cLogin
+		ojBody["senha"] := ::cPass
+
+		oRestCliente:SetPostParams(ojBody:toJson())
+
+		// Realiza o POST
+		Aadd(aHeader,'Accept: */*')
+		aadd(aHeader,'Content-Type: application/json; charset=utf8')
+
+		if oRestCliente:Post(aHeader)
+			cJson := oRestCliente:GetResult()
+			If !empty(cJson)
+				ojToken  := JsonObject():New()
+				cMsgJso := ojToken:fromJson(cJson)
+				If !empty(cMsgJso)
+					::cMensagemErro := 'Token - Json parser error. Tente novamente'
+					lRetorno := .F.
+				Else
+					::cToken := ojToken:GetJsonObject('ticket_hash')
+					::cValid := Left(ojToken:GetJsonObject('dt_expira'),19)
+				EndIf
+				::ojRetorno := ojToken
+			EndIf
+		else
+			::cMensagemErro := "Não foi possível recuperar o token. Tente novamente. - Erro:"+Alltrim(AlltoChar(oRestCliente:GetLastError()))
+			lRetorno := .F.
+		endif
+
+	EndIf
+
+	FreeObj(oRestCliente)
+
+	ZZH->(DbSetOrder(1))
+	if  !Empty(::cToken)
+		ZZH->(RecLock("ZZH", .F.))
+		ZZH->ZZH_TOKEN := ::cToken
+		//linha abaixo comentado porque o token perde a validade a cada 20 minutos se não usado, depois voltar essa opção
+		//ZZH->ZZH_VALID := ::cValid
+		if Val(Left(IncTime( TIME() , 0 , 20 , 0 ),2)) >= 24
+			cHora := "23:59:59"
+		else
+			cHora := IncTime( TIME() , 0 , 20 , 0 )
+		endif
+		ZZH->ZZH_VALID := Substr(Dtos(dDataBase),1,4) + "-" + Substr(Dtos(dDataBase),5,2) + "-" + Substr(Dtos(dDataBase),7,2)+"T"+cHora
+		ZZH->(MsUnlock())
+	endif
+
+Return lRetorno
+
+
+/*/{Protheus.doc} ExpenseOn::GrvCategoria
+Metodo de criacao de nova categoria / conta contabil
+@type method
+@author Luciano.braga
+@since 13/05/2022
+/*/
+Method GrvCategoria(aContas,cFilPro) CLASS ExpenseOn
+
+	Local lRet		:= .F.
+	Local aCat    	:= {}
+	Local aRetCat 	:= {}
+	Local nX		:= 0
+	Local nR		:= 0
+	Local nLenFor	:= 0
+	Local ojCat 	:= Nil
+	Local ojRequest	:= Nil
+
+	DEFAULT aContas	:= {}
+
+	nLenFor := Len(aContas)
+	If nLenFor == 0
+		::cMensagemErro := 'Para geração de categorias no ExpenseOn, informe codigo da natureza.'
+		Return .F.
+	EndIf
+
+	For nX:=1 to nLenFor
+		//					1-Filial	2-Cod			3-lRet	4-Msg
+		AAdd(::aRet, {aContas[nX,1], aContas[nX,2], .F., "" ,  aContas[nX,3], cFilPro } )
+		nR := Len(::aRet)
+
+		SED->(DbSetOrder(1)) //ED_FILIAL+ED_CODIGO
+		If !SED->(DbSeek(aContas[nX,1]+aContas[nX,2]))
+			::aRet[nR,3] := .F.
+			::aRet[nR,4] := 'Codigo de natureza informado ['+aContas[nX,1]+aContas[nX,2]+'], não foi encontrado.'
+		Else
+			ojCat 	:= JsonObject():New()
+			ojCat['categoryReferenceId']		:= SED->(ED_FILIAL+ED_CODIGO)		//Atributo usado para dar referência à categoria em questão
+			ojCat['categoryName']				:= Alltrim(SED->ED_DESCRIC)		//Nome da categoria
+			ojCat['glAccountReferenceId']		:= SED->ED_DEBITO		//Referência da conta contábil
+			ojCat['glAccountName']				:= ALLTRIM(POSICIONE("CT1", 1, XFILIAL("CT1")+SED->ED_DEBITO, "CT1_DESC01"))		//Nome da conta contábil
+			ojCat['isMileage']					:= .F.		//Define se a categoria é de Milhagem/Quilometragem
+			ojCat['isActive']					:= IIF(SED->ED_MSBLQL == '1',.F.,.T.)		//Define se a categoria está ativa ou inativa
+			ojCat['parentCategoryReferenceId']	:= SED->(ED_FILIAL+ED_PAI)		//Atributo usado para dar referência à categoria superior
+			AAdd(aCat, ojCat)
+		EndIf
+	Next nX
+
+	If Len(aCat) > 0
+		ojRequest 	:= JsonObject():New()
+		ojRequest['categories'] := aCat
+
+		lRet := ::ProcRequest("/api/integration/category", "POST", ojRequest:toJson() )
+		If !lRet
+			For nX:=1 to nLenFor
+				If Empty(::aRet[nX,5])
+					::aRet[nX,3] := .F.
+					::aRet[nX,4] := ::cMensagemErro
+				EndIF
+			Next nX
+		else
+			If !::ojRetorno['success']
+				For nX:=1 to nLenFor
+					If Empty(::aRet[nX,4])
+						::aRet[nX,3] := .F.
+						::aRet[nX,4] := "Cod: "+::ojRetorno['error_code']+": "+::ojRetorno['error_type']+" - "+::ojRetorno['error_description']
+					EndIF
+				Next nX
+
+			Else
+				aRetCat := ::ojRetorno['data',"categories"]
+				For nX:=1 to Len(aRetCat)
+					cCod	:= aRetCat[nX]['categoryReferenceId']
+					nPRet	:= aScan( ::aRet , {|x| Alltrim(x[1]+x[2]) == Alltrim(cCod) } )
+					If nPRet > 0
+						::aRet[nPRet,3] := .T.
+						::aRet[nPRet,4] := "Cod: "+cCod
+
+						dbSelectArea("SED")
+						SED->(dbGoto(::aRet[nPRet,5]))
+						SED->(Reclock("SED",.F.))
+						SED->ED_MSEXP := DTOS(date())
+						SED->(Msunlock())
+
+					EndIf
+				Next nX
+			EndIf
+		EndIf
+	EndIf
+
+Return(.T.)
+
+
+/*/{Protheus.doc} ExpenseOn::GrvCCusto
+Metodo de criacao de novo centro de custo
+@type method
+@author Luciano.braga
+@since 13/05/2022
+/*/
+Method GrvCCusto(aCCCusto, cFilPro ) CLASS ExpenseOn
+
+	Local lRet		:= .F.
+	Local aCC    	:= {}
+	Local aRetCC 	:= {}
+	Local aAreas	:= {}
+	Local aUsers	:= {}
+	Local aSubsid	:= {}
+	Local nX		:= 0
+	Local nR		:= 0
+	Local nLenFor	:= 0
+	Local ojCC 	:= Nil
+	Local ojRequest	:= Nil
+
+	DEFAULT aCCCusto	:= {}
+
+	nLenFor := Len(aCCCusto)
+	If nLenFor == 0
+		::cMensagemErro := 'Para geração de centros de custo no ExpenseOn, informe codigo do centro de custo.'
+		Return .F.
+	EndIf
+
+	For nX:=1 to nLenFor
+		//					1-Filial	    2-Cod		3-lRet 4-Msg
+		AAdd(::aRet, {aCCCusto[nX,1], aCCCusto[nX,2], .F., "" , aCCCusto[nX,3],  cFilPro } )
+		nR := Len(::aRet)
+
+		CTT->(DbSetOrder(1)) //CTT_FILIAL+CTT_CUSTO
+		If !CTT->(DbSeek(aCCCusto[nX,1]+aCCCusto[nX,2]))
+			::aRet[nR,3] := .F.
+			::aRet[nR,4] := 'Codigo de centro de custo informado ['+aCCCusto[nX,1]+aCCCusto[nX,2]+'], não foi encontrado.'
+		Else
+			ojCC 	:= JsonObject():New()
+			ojCC['costCenterReferenceId']	:= CTT->(CTT_FILIAL+CTT_CUSTO)		//Atributo usado para dar referência ao centro de custo em questão
+			ojCC['costCenterName']			:= Alltrim(CTT->CTT_DESC01)			//Nome do centro de custo
+			ojCC['costCenterOwner']			:= ""								//Código de referência do usuário responsável pelo centro de custo
+			ojCC['isActive']				:= IIF(CTT->CTT_BLOQ == '1',.F.,.T.)//Define se o centro de custo está ativo ou inativo
+			ojCC['areas']					:= aAreas							//Código de referência das áreas atribuídas ao centro de custo
+			ojCC['users']					:= aUsers							//Código de referência dos usuários atribuídos ao centro de custo
+			ojCC['subsidiaries']			:= aSubsid							//Código de referência das filiais atribuídas ao centro de custo
+
+			AAdd(aCC, ojCC)
+		EndIf
+	Next nX
+
+	If Len(aCC) > 0
+		ojRequest 	:= JsonObject():New()
+		ojRequest['costCenters'] := aCC
+
+		lRet := ::ProcRequest("/api/integration/costcenter", "POST", ojRequest:toJson() )
+		If !lRet
+			For nX:=1 to nLenFor
+				If Empty(::aRet[nX,5])
+					::aRet[nX,3] := .F.
+					::aRet[nX,4] := ::cMensagemErro
+				EndIF
+			Next nX
+		else
+			If !::ojRetorno['success']
+				For nX:=1 to nLenFor
+					If Empty(::aRet[nX,4])
+						::aRet[nX,3] := .F.
+						::aRet[nX,4] := "Cod: "+::ojRetorno['error_code']+": "+::ojRetorno['error_type']+" - "+::ojRetorno['error_description']
+					EndIF
+				Next nX
+
+			Else
+				aRetCC := ::ojRetorno['data',"costCenters"]
+				For nX:=1 to Len(aRetCC)
+					cCod	:= aRetCC[nX]['costCenterReferenceId']
+					nPRet	:= aScan( ::aRet , {|x| Alltrim(x[1]+x[2]) == Alltrim(cCod) } )
+					If nPRet > 0
+						::aRet[nPRet,3] := .T.
+						::aRet[nPRet,4] := "Cod: "+cCod
+
+						dbSelectArea("CTT")
+						CTT->(dbGoto(::aRet[nPRet,5]))
+						CTT->(Reclock("CTT",.F.))
+						CTT->CTT_MSEXP := DTOS(date())
+						CTT->(Msunlock())
+					EndIf
+				Next nX
+			EndIf
+		EndIf
+	EndIf
+
+Return(.T.)
+
+/*/{Protheus.doc} ExpenseOn::GetAdiantamentos
+Metodo de consulta de adiantamentos - para geracao de titulos a pagar
+@type method
+@author Luciano.braga
+@since 24/05/2022
+/*/
+Method GetAdiantamentos(dDtIni,dDtFim) CLASS ExpenseOn
+
+	Local lRet		:= .F.
+	Local cPath     := "/api/integration/advpayment/status/7"
+
+	DEFAULT dDtIni  := CtoD("")
+	DEFAULT dDtFim  := CtoD("")
+
+	If Empty(dDtIni)
+		::cMensagemErro := 'Para consulta de adiantamentos no ExpenseOn, informe data inicial do período.'
+		Return .F.
+	EndIf
+	If Empty(dDtFim)
+		::cMensagemErro := 'Para consulta de adiantamentos no ExpenseOn, informe data final do período.'
+		Return .F.
+	EndIf
+	If dDtIni > dDtFim
+		::cMensagemErro := 'Para consulta de adiantamentos no ExpenseOn, data inicial deve ser menor ou igual a data final do período.'
+		Return .F.
+	EndIf
+
+	cPath += "?startDate="+ConvData(dDtIni)+"&endDate="+ConvData(dDtFim)
+
+	lRet := ::ProcRequest(cPath, "GET", "", .T. )
+
+Return(lRet)
+
+
+
+/*/{Protheus.doc} ExpenseOn::GetTitulos
+Metodo de consulta de relatorio de titulos a pagar
+@type method
+@author Luciano.braga
+@since 24/05/2022
+/*/
+Method GetTitulos(dDtIni,dDtFim) CLASS ExpenseOn
+
+	Local lRet		:= .F.
+	Local cPath     := "/api/integration/report/status/7"
+
+	DEFAULT dDtIni      := CtoD("")
+	DEFAULT dDtFim      := CtoD("")
+
+	If Empty(dDtIni)
+		::cMensagemErro := 'Para consulta de relatorios no ExpenseOn, informe data inicial do período.'
+		Return .F.
+	EndIf
+	If Empty(dDtFim)
+		::cMensagemErro := 'Para consulta de relatorios no ExpenseOn, informe data final do período.'
+		Return .F.
+	EndIf
+	If dDtIni > dDtFim
+		::cMensagemErro := 'Para consulta de relatorios no ExpenseOn, data inicial deve ser menor ou igual a data final do período.'
+		Return .F.
+	EndIf
+
+	cPath += "?startDate="+ConvData(dDtIni)+"&endDate="+ConvData(dDtFim) //+IIf(Empty(dUltMudanca),"","&lastChangeDate="+ConvData(dUltMudanca))
+
+	lRet := ::ProcRequest(cPath, "GET", "", .T. )
+
+Return(lRet)
+
+
+/*/{Protheus.doc} ConvData
+Converte formato de data
+@type function
+@author Luciano.braga
+@since 24/05/2022
+/*/
+Static Function ConvData(dData)
+	Local cRet := Substr(Dtos(dData),1,4) + "-" + Substr(Dtos(dData),5,2) + "-" + Substr(Dtos(dData),7,2)
+Return cRet
+
+
+
+/*/{Protheus.doc} ExpenseOn::GrvAdiantamentos
+Metodo de geração de contas a pagar (Adiantamentos) a partir do Json de retorno do GetAdiantamentos
+@type method
+@author Luciano.braga
+@since 24/05/2022
+/*/
+Method GrvAdiantamentos(cFilPro,oJAdiantamentos) CLASS ExpenseOn
+
+	Local lRet			:= .T.
+	Local aAdiant    	:= {}
+	Local aTitulo       := {}
+	Local nX			:= 0
+	Local nLenAd		:= 0
+	Local nR			:= 0
+	Local nC			:= 0
+	Local cPrefixo      := ZZH->ZZH_PREFIX
+	Local cNumero       := ""
+	Local cParcela      := CriaVar("E2_PARCELA")
+	Local cTipo         := "PA "
+	Local nValor        := 0
+	Local dVencto       := CtoD("")
+	Local cNatureza     := ZZH->ZZH_NATURE
+	Local cBanco        := ZZH->ZZH_BANCO
+	Local cAgencia      := ZZH->ZZH_AGENCI
+	Local cConta        := ZZH->ZZH_CONTA
+	Local cCentroCusto  := ZZH->ZZH_CC
+	Local nDiasVcto     := ZZH->ZZH_DIAVCT
+	Local aRetLog	    := {}
+	Local cRet          := ""
+	Local dEmissao      := dDataBase
+
+	DEFAULT oJAdiantamentos := ::ojRetorno
+
+	aAdiant 	:= oJAdiantamentos['data',"advPayments"]
+	nLenAd		:= Len(aAdiant)
+	If nLenAd == 0
+		::cMensagemErro := 'Não existem adiantamentos para geração de titulos a pagar.'
+		Return .F.
+	Else
+		::aRet := {} // zera array de retorno
+		For nX:=1 to nLenAd
+			//{Begin} Transaction
+			AAdd(::aRet, {;
+				aAdiant[nX]['reference']			,;	// 1 - reference	string	Referência do adiantamento
+			aAdiant[nX]['parentReference']		,;	// 2 - parentReference	string	Referência do adiantamento de origem caso o mesmo seja valor residual
+			aAdiant[nX]['comment']				,;	// 3 - comment	string	Atributo utilizado para adicionar observações ao adiantamento
+			aAdiant[nX]['amount']				,;	// 4 - amount	decimal	Valor do adiantamento
+			aAdiant[nX]['currencyCode']			,;	// 5 - currencyCode	string	Código da moeda do adiantamento. Ex: BRL, USD, etc
+			aAdiant[nX]['convertionRate']		,;	// 6 - convertionRate	decimal	Taxa de conversão do adiantamento
+			aAdiant[nX]['currencyConvertion']	,;	// 7 - currencyConvertion	string	Código da moeda de conversão do adiantamento. Ex: BRL, USD, etc
+			aAdiant[nX]['convertedAmount']		,;	// 8 - convertedAmount	decimal	Valor do adiantamento convertido
+			aAdiant[nX]['advPaymentDate']		,;	// 9 - advPaymentDate	datetime	Data de vencimento do adiantamento
+			aAdiant[nX]['advPaymentStatus']		,;	//10 - advPaymentStatus	integer	Código do status do adiantamento
+			aAdiant[nX]['advPaymentStatusName']	,;	//11 - advPaymentStatusName	integer	Descrição do status do adiantamento
+			aAdiant[nX]['creator']["financeSystemId"]	,;	//12 - creator	User	Usuário criador do adiantamento
+			aAdiant[nX]['approver']["financeSystemId"]	,;	//13 - approver	User	Usuário aprovador do adiantamento
+			aAdiant[nX]['costCenterReferenceId'],;	//14 - costCenterReferenceId	string	Atributo que atrela o adiantamento à um centro de custo específico
+			aAdiant[nX]['firstApproval']		,;	//15 - firstApproval	datetime	Data da primeira aprovação do adiantamento
+			aAdiant[nX]['lastApproval']			,;	//16 - lastApproval	datetime	Data da última aprovação do adiantamento
+			aAdiant[nX]['submittedDate']		,;	//17 - submittedDate	datetime	Data do envio para aprovação
+			aAdiant[nX]['paymentDate']			,;	//18 - paymentDate	datetime	Data de reembolso do adiantamento
+			aAdiant[nX]['financeProcessStart']	,;	//19 - financeProcessStart	datetime	Data do processamento do documento financeiro
+			aAdiant[nX]['clientReferenceId']	,;	//20 - clientReferenceId	string	Atributo que atrela o adiantamento à um cliente específico
+			aAdiant[nX]['clientName']			,;	//21 - clientName	string	Nome do cliente do adiantamento
+			aAdiant[nX]['projectReferenceId']	,;	//22 - projectReferenceId	string	Atributo que atrela o adiantamento à um projeto específico
+			aAdiant[nX]['projectName']			,;	//23 - projectName	string	Nome do projeto do adiantamento
+			aAdiant[nX]['financeReferenceId']	,;	//24 - financeReferenceId	string	Atributo usado para dar referência ao documento em questão no contas a pagar no ERP
+			aAdiant[nX]['subsidiaryReference']	,;	//25 - subsidiaryReference	string	Referência da filial da despesa
+			aAdiant[nX]['subsidiaryName']		,;	//26 - subsidiaryName	string	Descrição da filial da despesa
+			aAdiant[nX]['areaReference']		,;	//27 - areaReference	string	Referência da área da despesa
+			aAdiant[nX]['areaName']				,;	//28 - areaName	string	Descrição da área da despesa
+			""									,;	//29 - Chave do SE2 gerada
+			""									,;	//30 - msg de critica
+			Alltrim(AlltoChar(aAdiant[nX]['creator']["name"])),;	//31 nome do fornecedor
+			""									,;	//32 - status de atualização
+			""									,;	//33 - msg de critica atualização do status
+			cFilPro								,;	//34 - Filial
+			""								    ;	//35 - status
+			} )
+			nR := Len(::aRet)
+
+			If !Empty(aAdiant[nX]['financeReferenceId']) // Já existe titulo gerado
+				::aRet[nR,30] := "Já existe titulo gerado [financeReferenceId] : "+aAdiant[nX]['financeReferenceId']
+				::aRet[nR,35] := "ERRO"
+				Loop
+			EndIf
+
+			If aAdiant[nX]['advPaymentStatus'] <> 7
+				::aRet[nR,30] := "Status ['advPaymentStatus'] " + cValToChar(aAdiant[nX]['advPaymentStatus'])
+				::aRet[nR,35] := "ERRO"
+				Loop
+			EndIf
+
+			//Consulta fornecedor
+			If Empty(aAdiant[nX]['creator']["financeSystemId"])
+				::aRet[nR,30] := "Fornecedor ["+Alltrim(AlltoChar(aAdiant[nX]['creator']["name"]))+"] não possui código de referencia no Protheus"
+				::aRet[nR,35] := "ERRO"
+				Loop
+			Else
+				SA2->(DbSetOrder(1)) //A2_FILIAL+A2_COD+A2_LOJA
+				If !SA2->(DbSeek(xFilial("SA2")+aAdiant[nX]['creator']["financeSystemId"] ) )
+					::aRet[nR,30] := "Fornecedor não encontrado com o codigo "+aAdiant[nX]['creator']["financeSystemId"]
+					::aRet[nR,35] := "ERRO"
+					Loop
+				EndIf
+			EndIf
+
+			//dEmissao:= StoD(StrTran(SubStr(aAdiant[nX]['lastApproval'],1,10),"-",""))
+			//If Empty(dEmissao)
+			dEmissao := dDatabase
+			//EndIf
+
+			If nDiasVcto <> 0
+				dVencto := dEmissao + nDiasVcto
+			Else
+				dVencto := dEmissao
+			EndIf
+
+			nValor := Round(aAdiant[nX]['amount'],TamSX3("E2_VALOR")[2])
+			If Empty(nValor)
+				::aRet[nR,30] := "Problemas na identificação do valor do titulo: "+Alltrim(AlltoChar(aAdiant[nX]['amount']))
+				::aRet[nR,35] := "ERRO"
+				Loop
+			EndIf
+
+			//NUMERACAO SEQUENCIAL
+			cNumero := SE2->(GetSXENum("SE2","E2_NUM"))
+			SE2->(ConfirmSx8())
+			SE2->(DBSetOrder(1)) // E2_FILIAL+E2_PREFIXO+E2_NUM+E2_PARCELA+E2_TIPO+E2_FORNECE+E2_LOJA
+			SE2->(DBSeek(xFilial("SE2")+cPrefixo+cNumero+cParcela+cTipo,.F.))
+			While (SE2->(Found()))
+				cNumero := SE2->(GetSXENum("SE2","E2_NUM"))
+				SE2->(ConfirmSx8())
+				SE2->(DBSeek(xFilial("SE2")+cPrefixo+cNumero+cParcela+cTipo,.F.))
+			EndDo
+
+			aTitulo := {	{"E2_PREFIXO"	, cPrefixo	 						,Nil},;
+				{"E2_NUM"		, cNumero	 						,Nil},;
+				{"E2_PARCELA"	, cParcela	 						,Nil},;
+				{"E2_TIPO"		, cTipo	 							,Nil},;
+				{"E2_FORNECE"	, SA2->A2_COD	 					,Nil},;
+				{"E2_LOJA"		, SA2->A2_LOJA	 					,Nil},;
+				{"E2_NOMFOR"	, SA2->A2_NREDUZ	 				,Nil},;
+				{"E2_VALOR"		, Abs(nValor)		 				,Nil},;
+				{"E2_EMIS1"		, dEmissao	 						,Nil},;
+				{"E2_EMISSAO"	, dEmissao	 						,Nil},;
+				{"E2_VENCTO"	, dVencto	 						,Nil},;
+				{"E2_VENCREA"	, DataValida(dVencto)				,Nil},;
+				{"E2_VENCORI"	, dVencto			 				,Nil},;
+				{"E2_SALDO"		, Abs(nValor)		 				,Nil},;
+				{"E2_NATUREZ"	, cNatureza	 						,Nil},;
+				{"E2_VLCRUZ"	, Abs(nValor)		 				,Nil},;
+				{"E2_CCUSTO"	, cCentroCusto 	 					,Nil},;
+				{"E2_ORIGEM"	,"FINA050"	 						,Nil},;
+				{"E2_MOEDA"		,1	 								,Nil},;
+				{"E2_XIDEXP"	,aAdiant[nX]['reference']			,Nil},;
+				{"AUTBANCO"     ,cBanco                             ,NIL},;
+				{"AUTAGENCIA"   ,cAgencia                           ,NIL},;
+				{"AUTCONTA"     ,cConta                             ,NIL},;
+				{"E2_HIST"		,aAdiant[nX]['comment']				,Nil} }
+
+
+			lMSHelpAuto     := .T. //.F. // para nao mostrar os erro na tela
+			lMSErroAuto     := .F. //.F. // inicializa como falso, se voltar verdadeiro e' que deu erro
+			lAutoErrNoFile 	:= .T.
+
+			MSExecAuto({|a,b,c,d,e,f,g| FINA050(a,b,c,d,e,f,g)},aTitulo/*aRotAuto*/,3/*nOpcion*/,3/*nOpcAuto*/,/*bExecuta,*/,/*aDadosBco*/,.F./*lExibeLanc*/,.F./*lOnline*/,/*aDadosCTB*/,/*aTitPrv*/,/*lMsBlQl*/)
+
+			If lMsErroAuto
+				aRetLog	:= GetAutoGrLog()
+				cRet    := "Erro na geração do titulo "
+				If Len(aRetLog) > 0
+					For nC := 1 To Len(aRetLog)
+						cTexto := AllTrim(aRetLog[nC])
+						cTexto := Replace(cTexto, chr(13)+chr(10), '|')
+						cTexto := Replace(cTexto, chr(10)+chr(13), '|')
+						cRet += cTexto
+					Next nC
+				EndIf
+				::aRet[nR,30] := cRet
+				::aRet[nR,35] := "ERRO"
+			Else
+				//----------------------------------------------------------------------------
+				// Confirma se o Titulo foi gerado.
+				//----------------------------------------------------------------------------
+				DBSelectArea("SE2")
+				SE2->(DBSetOrder(1)) // E2_FILIAL+E2_PREFIXO+E2_NUM+E2_PARCELA+E2_TIPO+E2_FORNECE+E2_LOJA
+				If	SE2->(DBSeek(xFilial("SE2")+cPrefixo+cNumero+cParcela+cTipo+SA2->(A2_COD+A2_LOJA)))
+					::aRet[nR,29] := SE2->(E2_FILIAL+E2_PREFIXO+E2_NUM+E2_PARCELA+E2_TIPO)
+					::aRet[nR,35] := "SUCESSO"
+				Else
+					::aRet[nR,30] := "Houve um problema na geração do Contas a Pagar."
+					::aRet[nR,35] := "ERRO"
+				EndIf
+
+			EndIf
+			//End Transaction
+		Next nX
+
+	EndIF
+
+Return(lRet)
+
+/*/{Protheus.doc} ExpenseOn::GrvTitulos
+Metodo de geração de contas a pagar (relatorio de titulos) a partir do Json de retorno do GetTitulos
+@type method
+@author Luciano.braga
+@since 24/05/2022
+/*/
+Method GrvTitulos(cFilPro,oJTitulos) CLASS ExpenseOn
+
+	Local lRet			:= .T.
+	Local aTitulo       := {}
+	Local nX			:= 0
+	Local nLenAd		:= 0
+	Local nR			:= 0
+	Local cPrefixo      := ZZH->ZZH_PREFDP
+	Local cNumero       := ""
+	Local cParcela      := CriaVar("E2_PARCELA")
+	Local cTipo         := ZZH->ZZH_TIPODP
+	Local cConPag       := ZZH->ZZH_CONDPG
+	Local nValor        := 0
+	Local dVencto       := CtoD("")
+	Local nY            := 0
+	Local oJTit         := Nil
+	Local oDesp         := nil
+	Local aDesp         := {}
+	Local aRateio       := {}
+	Local aAdiant       := {}
+	Local cNatureza     := ""
+	Local cCCusto       := CriaVar('E2_CCD')
+	Local aRetLog	    := {}
+	Local cRet          := ""
+	Local cTexto        := ""
+
+	Local aAuxEv        := {} // array auxiliar do rateio multinaturezas
+	Local aRatEvEz      := {} //array do rateio multinaturezas
+	Local aAuxEz        := {} // Array auxiliar de multiplos centros de custo
+	Local aRatEz        := {} //Array do rateio de centro de custo em multiplas naturezas
+	Local aN1           := {}
+	Local nPosN1        := 0
+	Local nPosN1C       := 0
+	Local nC            := 0
+	Local aRecSE2       := {}
+	Local aRecPA        := {}
+	Local nSaldoComp    := 0
+	Local nDepVlr       := 0
+	Local aReports      := {}
+	Local nTotAdiant    := 0
+	Local aCCusto       := {}
+	Local nPosCC        := 0
+	Local cRateiCC      := ""
+	Local cRateio       := ""
+	Local lDevol        := .f.
+	Local aRetPA        := {}
+	Local aDadosCTB     := {}
+	Local aAuxCTJ       := {}
+	Local lNaoReembolsa := .F.
+
+	DEFAULT oJTitulos := ::ojRetorno
+
+	aReports  	:= oJTitulos['data']:getJsonobject('reports')
+
+	nLenAd		:= Len(aReports)
+	If nLenAd == 0
+		::cMensagemErro := 'Não existem movimentos para geração de titulos a pagar.'
+		Return .F.
+	Else
+		::aRet := {} // zera array de retorno
+		For nY:=1 to nLenAd
+			lNaoReembolsa := .F.
+			oJTit := aReports[nY]
+			nDepVlr := 0
+
+			If oJTit['totalReimbursable'] <> 0
+				nDepVlr :=  Round(oJTit['totalReimbursable'],TamSX3("E2_VALOR")[2])
+			Else
+				If oJTit['totalReimbursableExpense'] <> 0
+					nDepVlr := Round(oJTit['totalReimbursableExpense'],TamSX3("E2_VALOR")[2])
+				else
+					lNaoReembolsa := .T.
+				EndIf
+			EndIf
+
+			AAdd(::aRet, {;
+				oJTit['reference'] ,;	                // 1 - reference	string	Referência
+			oJTit['name'],;                         // 2 - name
+			oJTit['lastApproval'],;                 // 3 - Emissao
+			oJTit['lastApproval'],;                 // 4 - vecto
+			nDepVlr,;                               // 5 - Valor Total
+			oJTit['creator']['financeSystemId'],;	// 6 - cod fornecedor
+			Alltrim(AlltoChar(oJTit['creator']["name"])),;	//7 nome do fornecedor
+			""									,;	//8 - Chave do SE2 gerada
+			""									,;	//9 - msg de critica erro
+			""	    							,;	//10 - status de atualização
+			""									,;	//11 - msg de critica atualização do status
+			""									,;	//12 - status da compensação
+			cFilPro								,;	//13 - Filial
+			0								    ,;	//14 - codigo status
+			lNaoReembolsa						;	//15 - 100% reembolsavel = .T. ou .F. não é 100% reelmbolsavel
+			})
+
+			nR := Len(::aRet)
+
+			if lNaoReembolsa
+				//Se for 100% não reembolsavel, vou retornar o status 4 para finalizado
+				::aRet[nR][14] := 4
+			else
+
+				If !Empty(oJTit['financeDocumentId']) // Já existe titulo gerado
+					::aRet[nR,09] := "Já existe titulo gerado [financeDocumentId] : "+oJTit['financeDocumentId']
+					::aRet[nR,10] := "ERRO"
+					Loop
+				EndIf
+
+				If oJTit['reportStatusId'] <> 7
+					::aRet[nR,09] := "Status ['reportStatusId'] " + cValToChar(oJTit['reportStatusId'])
+					::aRet[nR,10] := "ERRO"
+					Loop
+				EndIf
+
+				//Consulta fornecedor
+				If Empty(oJTit['creator']["financeSystemId"])
+					::aRet[nR,09] := "Fornecedor ["+Alltrim(AlltoChar(oJTit['creator']["name"]))+"] não possui código de referencia no Protheus"
+					::aRet[nR,10] := "ERRO"
+					Loop
+				Else
+					SA2->(DbSetOrder(1)) //A2_FILIAL+A2_COD+A2_LOJA
+					If !SA2->(DbSeek(FWxFilial("SA2")+oJTit['creator']["financeSystemId"] ) )
+						::aRet[nR,09] := "Fornecedor não encontrado com o codigo "+oJTit['creator']["financeSystemId"]
+						::aRet[nR,10] := "ERRO"
+						Loop
+					EndIf
+				EndIf
+
+				//dEmissao:= StoD(StrTran(SubStr(oJTit['lastApproval'],1,10),"-",""))
+				//If Empty(dEmissao)
+				dEmissao:= dDatabase
+				//EndIf
+
+				nValor := Round(oJTit['totalReimbursableExpense'],TamSX3("E2_VALOR")[2])
+				If Empty(nValor) .and. !lNaoReembolsa
+					::aRet[nR,09] := "Problemas na identificação do valor do titulo: "+Alltrim(AlltoChar(oJTit['totalReimbursableExpense']))
+					::aRet[nR,10] := "ERRO"
+					Loop
+				EndIf
+
+				aDesp := oJTit['expenses']
+				aRateio  := {}
+				cErrRat  := ""
+				aAuxEv   := {}
+				aRatEvEz := {}
+				aAuxEz   := {}
+				aRatEz   := {}
+				aN1      := {}
+				aRecSE2  := {}
+				aRecPA   := {}
+				nSaldoComp := 0
+				cNatureza  := ZZH->ZZH_NATURD
+				cCCusto    := ""
+				aTitulo    := {}
+				nTotAdiant := 0
+				aCCusto    := {}
+				cRateio    := ""
+				lDevol     := .f.
+				aDadosCTB  := {}
+				aAuxCTJ    := {}
+
+				lNaoReembolsa := ValidaPayment(aDesp)
+
+				if lNaoReembolsa
+					//Se for 100% não reembolsavel, vou retornar o status 4 para finalizado
+					::aRet[nR][14] := 4
+					::aRet[nR][15] := lNaoReembolsa
+				else
+
+					For nX :=1 to Len(aDesp)
+						oDesp := aDesp[nX]
+						aadd(aRateio,{;
+							oDesp['reference'],;
+							oDesp['categoryReferenceId'],;     //cod natureza
+						oDesp['categoryDescription'],;     //desc natureza
+						oDesp['costCenterReferenceId'],;   //cod Centro Custo
+						Round(oDesp['amount'],TamSX3("E2_VALOR")[2]);  //Valor
+						})
+
+						If Empty(oDesp['categoryReferenceId'])
+							cErrRat += "| Cod. Ref. Natureza não informada "+AllTrim(oDesp['categoryDescription'])
+						Else
+							SED->(DbSetOrder(1)) //ED_FILIAL+ED_COD
+							If !SED->(DbSeek(FWxFilial("SED")+AvKey(oDesp['categoryReferenceId'],"ED_CODIGO") ) )
+								cErrRat += "| Natureza não encontrada "+AllTrim(oDesp['categoryReferenceId'])
+							Else
+								If SED->ED_TIPO <> '2'
+									cErrRat += "| Natureza não Analitica "+AllTrim(oDesp['categoryReferenceId'])
+								EndIf
+							EndIf
+						EndIf
+
+						If Empty(oDesp['costCenterReferenceId'])
+							cErrRat += "| Cod. Ref. C.Custo não informado  "
+						Else
+							CTT->(DbSetOrder(1)) //CTT_FILIAL+CTT_CUSTO
+							If !CTT->(DbSeek(FWxFilial("CTT")+AvKey(oDesp['costCenterReferenceId'],"CTT_CUSTO") ) )
+								cErrRat += "| C.Custo não encontrado "+AllTrim(oDesp['costCenterReferenceId'])
+							Else
+								If CTT->CTT_CLASSE <> '2'
+									cErrRat += "| C.Custo não Analitica "+AllTrim(oDesp['costCenterReferenceId'])
+								EndIf
+							EndIf
+						EndIf
+
+					Next nX
+
+					If Empty(aRateio)
+						::aRet[nR,09] := "Não há despesas para rateio [expenses] vazio "
+						::aRet[nR,10] := "ERRO"
+						Loop
+					EndIf
+
+					If !Empty(cErrRat)
+						::aRet[nR,09] := cErrRat
+						::aRet[nR,10] := "ERRO"
+						Loop
+					EndIf
+
+					//aglutino o rateio por natureza x c.custo
+					For nX := 1 to len(aRateio)
+						nPosCC := Ascan(aCCusto,{|x| x[1] == aRateio[nX][4]})
+						If nPosCC == 0
+							AADD(aCCusto,{aRateio[nX][4],aRateio[nX][5]})
+						Else
+							aCCusto[nPosCC][02] += aRateio[nX][5]
+						EndIf
+						nPosN1 :=  Ascan(aN1,{|x| x[1] == aRateio[nX][2]})
+						If nPosN1==0
+							AADD(aN1,{aRateio[nX][2],aRateio[nX][5],{{aRateio[nX][4],aRateio[nX][5]}}})
+						Else
+							aN1[nPosN1][2] += aRateio[nX][5]
+							nPosN1C := Ascan(aN1[nPosN1][3],{|x| x[1] == aRateio[nX][4]})
+							If nPosN1C==0
+								aadd(aN1[nPosN1][3],{aRateio[nX][4],aRateio[nX][5]})
+							Else
+								aN1[nPosN1][3][nPosN1C][2] += aRateio[nX][5]
+							EndIf
+						EndIf
+					Next nX
+
+					If len(aN1) == 1 .and. len(aN1[1][3]) == 1 //sem nenhum rateio
+						cNatureza := aN1[1][1]
+						cCCusto   := aN1[1][3][1][1]
+						cRateio   := "N"
+						aDadosCTB := {}
+					Else
+						If len(aN1) == 1 .and. len(aCCusto) > 1 //rateio somente c.custo
+							cNatureza  := aN1[1][1]
+							cCCusto    := ""
+							cRateio    := "S"
+							For nX := 1 to len(aCCusto)
+								aadd( aAuxCTJ ,{"CTJ_PERCEN" , Round(((aCCusto[nX][02]) / nValor)*100,2) , Nil })
+								aadd( aAuxCTJ ,{"CTJ_VALOR"  , aCCusto[nX][02]  , Nil })
+								aadd( aAuxCTJ ,{"CTJ_HIST"   , "INTEGRACAO EXPENSEON"  , Nil })
+								aadd( aAuxCTJ ,{"CTJ_CCD"    , aCCusto[nX][01]  , Nil })
+								//aadd( aAuxCTJ ,{"CTJ_CCC"    , aCCusto[nX][01]  , Nil })
+								//aadd( aAuxCTJ ,{"CTJ_EVENTO" , ""               , Nil })
+								aadd(aDadosCTB,aAuxCTJ)
+								aAuxCTJ := {}
+							Next nX
+						Else
+							cRateio   := "N"
+							aDadosCTB := {}
+							If len(aN1) > 1 .and. len(aCCusto) == 1 //rateio multinaturezas sem rateio de c.custo
+								cRateiCC := "2"
+								cCCusto  := aCCusto[1][1]
+							Else
+								cRateiCC := "1"    ////rateio multinaturezas com rateio de c.custo
+							EndIf
+
+							For nX := 1 to len(aN1)
+								aadd( aAuxEv ,{"EV_NATUREZ" , aN1[nX][1]    , Nil })//natureza a ser rateada
+								aadd( aAuxEv ,{"EV_VALOR"   , aN1[nX][2]    , Nil })//valor do rateio na natureza
+								aadd( aAuxEv ,{"EV_PERC"    , "100"         , Nil })//percentual do rateio na natureza
+								aadd( aAuxEv ,{"EV_RATEICC" , cRateiCC      , Nil })//indicando que há rateio por centro de custo
+
+								For nC := 1 to len(aN1[nX][3])
+									aAuxEz:={}
+									aadd( aAuxEz ,{"EZ_CCUSTO"  , aN1[nX][3][nC][1]  , Nil })//centro de custo da natureza
+									aadd( aAuxEz ,{"EZ_VALOR"   , aN1[nX][3][nC][2]  , Nil })//valor do rateio neste centro de custo
+									aadd(aRatEz,aAuxEz)
+								Next nC
+
+								aadd(aAuxEv,{"AUTRATEICC" , aRatEz, Nil })//recebendo dentro do array da natureza os multiplos centros de custo
+								aAdd(aRatEvEz,aAuxEv)//adicionando a natureza ao rateio de multiplas naturezas
+
+								// Limpar os Arrays
+								aAuxEv:={}
+								aAuxEz:={}
+								aRatEz:={}
+							Next nX
+						EndIf
+
+					EndIf
+
+					aAdiant := oJTit['advPayments']
+					aTitPA  := {}
+					aRecPA  := {}
+					aRetPA  := {}
+					nTotAdiant := 0
+					SE2->(DBSetOrder(1)) // E2_FILIAL+E2_PREFIXO+E2_NUM+E2_PARCELA+E2_TIPO+E2_FORNECE+E2_LOJA
+					For nX :=1 to Len(aAdiant)
+						oAdiant := aAdiant[nX]
+						aadd(aTitPA,{;
+							oAdiant['reference'],;
+							oAdiant['financeReferenceId'];
+							})
+						If SE2->(DBSeek(oAdiant['financeReferenceId'],.F.))
+							aadd(aRecPA,SE2->(RECNO()))
+							nTotAdiant += SE2->E2_SALDO
+						EndIf
+					Next nX
+
+					If !Empty(aAdiant)
+						dVencto := date()
+					Else
+						dVencto := Condicao(nValor,cConPag,,date())[1][1]
+					EndIf
+					If Empty(dVencto)
+						::aRet[nR,09] := "Problemas na geração data de vencimento: "
+						::aRet[nR,10] := "ERRO"
+						Loop
+					EndIf
+
+					//desvio para as devoluções baixas de PA
+					If lDevol .and. !Empty(aRecPA)
+						aRetPA := GrvBXPA(aRecPA)
+						If aRetPA[1]
+							::aRet[nR,10] := "DEVOLUÇÃO - SUCESSO NA BAIXA DO ADIANTAMENTO"
+							::aRet[nR,14] := 3
+						Else
+							::aRet[nR,09] := aRetPA[2]
+							::aRet[nR,10] := "ERRO"
+						EndIf
+						Loop
+					EndIf
+
+					//NUMERACAO SEQUENCIAL
+					cNumero := SE2->(GetSXENum("SE2","E2_NUM"))
+					SE2->(ConfirmSx8())
+					SE2->(DBSetOrder(1)) // E2_FILIAL+E2_PREFIXO+E2_NUM+E2_PARCELA+E2_TIPO+E2_FORNECE+E2_LOJA
+					SE2->(DBSeek(xFilial("SE2")+cPrefixo+cNumero+cParcela+cTipo,.F.))
+					While (SE2->(Found()))
+						cNumero := SE2->(GetSXENum("SE2","E2_NUM"))
+						SE2->(ConfirmSx8())
+						SE2->(DBSeek(xFilial("SE2")+cPrefixo+cNumero+cParcela+cTipo,.F.))
+					EndDo
+
+					If Empty(aRatEvEz)
+						aTitulo := {	{"E2_PREFIXO"	, cPrefixo	 						,Nil},;
+							{"E2_NUM"		, cNumero	 						,Nil},;
+							{"E2_PARCELA"	, cParcela	 						,Nil},;
+							{"E2_TIPO"		, cTipo	 							,Nil},;
+							{"E2_FORNECE"	, SA2->A2_COD	 					,Nil},;
+							{"E2_LOJA"		, SA2->A2_LOJA	 					,Nil},;
+							{"E2_NOMFOR"	, SA2->A2_NREDUZ	 				,Nil},;
+							{"E2_VALOR"		, Abs(nValor)		 				,Nil},;
+							{"E2_EMIS1"		, dEmissao	 						,Nil},;
+							{"E2_EMISSAO"	, dEmissao	 						,Nil},;
+							{"E2_VENCTO"	, dVencto	 						,Nil},;
+							{"E2_VENCREA"	, DataValida(dVencto)				,Nil},;
+							{"E2_VENCORI"	, dVencto			 				,Nil},;
+							{"E2_SALDO"		, Abs(nValor)		 				,Nil},;
+							{"E2_NATUREZ"	, cNatureza	 						,Nil},;
+							{"E2_VLCRUZ"	, Abs(nValor)		 				,Nil},;
+							{"E2_ORIGEM"	,"FINA050"	 						,Nil},;
+							{"E2_MOEDA"		,1	 								,Nil},;
+							{"E2_CCUSTO"    , cCCusto	 			            ,Nil},;
+							{"E2_RATEIO"    , cRateio                           ,Nil},;
+							{"E2_XIDEXP"	,oJTit['reference']     			,Nil},;
+							{"E2_HIST"		,oJTit['name']				        ,Nil} }
+						//{"E2_ARQRAT"    , cArqRat                           ,Nil},;
+						Else
+						aTitulo := {	{"E2_PREFIXO"	, cPrefixo	 						,Nil},;
+							{"E2_NUM"		, cNumero	 						,Nil},;
+							{"E2_PARCELA"	, cParcela	 						,Nil},;
+							{"E2_TIPO"		, cTipo	 							,Nil},;
+							{"E2_FORNECE"	, SA2->A2_COD	 					,Nil},;
+							{"E2_LOJA"		, SA2->A2_LOJA	 					,Nil},;
+							{"E2_NOMFOR"	, SA2->A2_NREDUZ	 				,Nil},;
+							{"E2_VALOR"		, Abs(nValor)		 				,Nil},;
+							{"E2_EMIS1"		, dEmissao	 						,Nil},;
+							{"E2_EMISSAO"	, dEmissao	 						,Nil},;
+							{"E2_VENCTO"	, dVencto	 						,Nil},;
+							{"E2_VENCREA"	, DataValida(dVencto)				,Nil},;
+							{"E2_VENCORI"	, dVencto			 				,Nil},;
+							{"E2_SALDO"		, Abs(nValor)		 				,Nil},;
+							{"E2_NATUREZ"	, cNatureza	 						,Nil},;
+							{"E2_VLCRUZ"	, Abs(nValor)		 				,Nil},;
+							{"E2_ORIGEM"	,"FINA050"	 						,Nil},;
+							{"E2_MOEDA"		, 1	 								,Nil},;
+							{"E2_CCUSTO"	, cCCusto	 			            ,Nil},;
+							{"E2_XIDEXP"	, oJTit['reference']     			,Nil},;
+							{"E2_HIST"		, oJTit['name']				        ,Nil},;
+							{"E2_RATEIO"    , "N"                               ,Nil},;
+							{"E2_MULTNAT"   , '1'                               ,Nil},;  //rateio multinaturezs = sim
+						{"AUTRATEEV"    , aRatEvEz                          ,Nil}}  //adicionando ao vetor aCab o vetor do rateio
+					EndIf
+
+					lMSHelpAuto     := .T. //.F. // para nao mostrar os erro na tela
+					lMSErroAuto     := .F. //.F. // inicializa como falso, se voltar verdadeiro e' que deu erro
+					lAutoErrNoFile 	:= .T.
+					if !lNaoReembolsa
+						MSExecAuto({|a,b,c,d,e,f,g,h,i,j| FINA050(a,b,c,d,e,f,g,h,i,j)},aTitulo/*aRotAuto*/,3/*nOpcion*/,3/*nOpcAuto*/,/*bExecuta,*/,/*aDadosBco*/,.F./*lExibeLanc*/,.F./*lOnline*/,aDadosCTB,/*aTitPrv*/,/*lMsBlQl*/)
+
+						If lMsErroAuto
+							aRetLog	:= GetAutoGrLog()
+							cRet    := "Erro na geração do titulo "
+							If Len(aRetLog) > 0
+								For nC := 1 To Len(aRetLog)
+									cTexto := AllTrim(aRetLog[nC])
+									cTexto := Replace(cTexto, chr(13)+chr(10), '|')
+									cTexto := Replace(cTexto, chr(10)+chr(13), '|')
+									cRet += cTexto
+								Next nC
+							EndIf
+							::aRet[nR,09] := cRet
+							::aRet[nR,10] := "ERRO"
+						Else
+							//----------------------------------------------------------------------------
+							// Confirma se o Titulo foi gerado.
+							//----------------------------------------------------------------------------
+							DBSelectArea("SE2")
+							SE2->(DBSetOrder(1)) // E2_FILIAL+E2_PREFIXO+E2_NUM+E2_PARCELA+E2_TIPO+E2_FORNECE+E2_LOJA
+							If	SE2->(DBSeek(xFilial("SE2")+cPrefixo+cNumero+cParcela+cTipo+SA2->(A2_COD+A2_LOJA)))
+								::aRet[nR,08] := SE2->(E2_FILIAL+E2_PREFIXO+E2_NUM+E2_PARCELA+E2_TIPO)
+								::aRet[nR,10] := "SUCESSO"
+								::aRet[nR,14] := 8
+								aadd(aRecSE2,SE2->(RECNO()))
+								nSaldoComp := SE2->E2_SALDO
+								If !Empty(aRecPA)
+									If MaIntBxCP( 2, aRecSE2,,aRecPA,,,,,, nSaldoComp,,,,,)
+										If nSaldoComp > nTotAdiant //as despesas são maiores que os adiantamentos
+											::aRet[nR,12] := "SUCESSO FEZ A COMPESAÇÃO DO ADIANTAMENTO - MAS TEVE SALDO"
+											::aRet[nR,14] := 8
+										Else
+											::aRet[nR,12] := "SUCESSO FEZ A COMPESAÇÃO DO ADIANTAMENTO"
+											::aRet[nR,14] := 3
+										EndIf
+									Else
+										::aRet[nR,12] := "ERRO - NÃO FEZ A COMPESAÇÃO DO ADIANTAMENTO"
+										::aRet[nR,14] := 0
+									EndIf
+								Else
+									::aRet[nR,12] := "NÃO HA A COMPESAÇÃO DE ADIANTAMENTO"
+								EndIf
+							Else
+								::aRet[nR,09] := "Houve um problema na geração da Despesa no Contas a Pagar."
+								::aRet[nR,10] := "ERRO"
+							EndIf
+						endif
+					EndIf
+				endif
+			Endif
+		Next nY
+
+		FreeObj(oJTit)
+
+	EndIf
+
+Return(lRet)
+
+Method ChkFilial(cFilReg) CLASS ExpenseOn
+
+	If Empty(cFilReg)
+		Return .F.
+	EndIf
+
+	If Select('SM0') == 0
+		OpenSM0()
+	EndIf
+
+	SM0->(DbSetOrder(1))
+	If !SM0->(MsSeek(cEmpAnt + cFilReg))
+		SM0->(MsSeek(cEmpAnt + cFilAnt))
+		Return .F.
+	EndIf
+
+	cFilAnt := cFilReg
+
+Return .T.
+
+
+Method PostChangPA(aRet,nType) CLASS ExpenseOn
+
+	Local lRet		:= .F.
+	Local aCH    	:= {}
+	Local nX		:= 0
+	Local nLenRet	:= 0
+	Local ojCH 		:= Nil
+	Local ojRequest	:= Nil
+	Local aRetCH    := {}
+
+	DEFAULT aRet := {}
+
+	nLenRet := Len(aRet)
+	If nLenRet == 0
+		::cMensagemErro := 'Não há Adiantamentos para Atualização de Status no ExpenseOn.'
+		Return .F.
+	EndIf
+
+	For nX:=1 to nLenRet
+		If !Empty(aRet[nX][1]) .and. !Empty(aRet[nX][29])
+			ojCH	:= JsonObject():New()
+			ojCH['documentType']		:= nType								//1 - Report, 2 - Expense, 3 - AdvPayment
+			ojCH['documentId']			:= aRet[nX][1]							//Identificação do documento no ExpenseOn
+			ojCH['financeDocumentId']	:= aRet[nX][29]							//Numero do Titulo no ERP
+			ojCH['date']				:= ConvData(date())						//Data da alteração de status e/ou referência do documento
+			ojCH['status']				:= Iif(Empty(aRet[nX][29]), 9 , 3 )		//8 - Documento foi criado no ERP
+			//9 - Erro na criação do documento de Contas a Pagar no ERP
+			//3 - Documento financeiro foi pago com sucesso no Contas a Pagar no ERP
+			//4 - Documento financeiro foi encerrado com sucesso no Contas a Pagar no ERP
+			ojCH['message']				:= aRet[nX][30]							//Mensagem de resposta do ERP em casos de erro
+			AAdd(aCH,ojCH)
+		EndIf
+	Next nX
+
+	If Len(aCH) > 0
+		ojRequest 	:= JsonObject():New()
+		ojRequest['changes'] := aCH
+
+		lRet := ::ProcRequest("/api/integration/document", "POST", ojRequest:toJson() )
+		If !lRet
+			For nX:=1 to nLenRet
+				aRet[nX,32] := "Erro da Atualização do Status"
+				aRet[nX,33] := ::cMensagemErro
+			Next nX
+		else
+			If !::ojRetorno['success']
+				For nX:=1 to nLenRet
+					aRet[nX,32] := "Erro da Atualização do Status"
+					aRet[nX,33] := "Cod: "+::ojRetorno['error_code']+": "+::ojRetorno['error_type']+" - "+::ojRetorno['error_description']
+				Next nX
+			Else
+				aRetCH := ::ojRetorno['data']
+				For nX:=1 to Len(aRetCH)
+					cCod	:= aRetCH[nX]['documentId']
+					nPRet	:= aScan( aRet , {|x| Alltrim(x[1]) == Alltrim(cCod) } )
+					If nPRet > 0
+						aRet[nPRet,32] := "SUCESSO"
+						aRet[nPRet,33] := ""
+					EndIf
+				Next nX
+			EndIf
+		EndIf
+
+	EndIf
+
+Return(.T.)
+
+Method PostChangDP(aRet,nType,nFase) CLASS ExpenseOn
+
+	Local lRet		:= .F.
+	Local aCH    	:= {}
+	Local nX		:= 0
+	Local nLenRet	:= 0
+	Local ojCH 		:= Nil
+	Local ojRequest	:= Nil
+	Local aRetCH    := {}
+
+	DEFAULT aRet := {}
+
+	nLenRet := Len(aRet)
+	If nLenRet == 0
+		::cMensagemErro := 'Não há Adiantamentos para Atualização de Status no ExpenseOn.'
+		Return .F.
+	EndIf
+
+	If nFase == 1
+		aCH := {}
+		For nX:=1 to nLenRet
+			if aRet[nX][15] // Se for 100% reembolsavel, mudo para status 8 obrigatóriamente pois tenho que enviar duas vezes
+				ojCH	:= JsonObject():New()
+				ojCH['documentType']		:= nType								//1 - Report, 2 - Expense, 3 - AdvPayment
+				ojCH['documentId']			:= aRet[nX][1]							//Identificação do documento no ExpenseOn
+				ojCH['financeDocumentId']	:= aRet[nX][8]							//Numero do Titulo no ERP
+				ojCH['date']				:= ConvData(date())						//Data da alteração de status e/ou referência do documento
+				ojCH['status']			    := 8                                    //8 - Documento foi criado no ERP
+				//9 - Erro na criação do documento de Contas a Pagar no ERP
+				//3 - Documento financeiro foi pago com sucesso no Contas a Pagar no ERP
+				//4 - Documento financeiro foi encerrado com sucesso no Contas a Pagar no ERP
+				ojCH['message']				:= aRet[nX][9]							//Mensagem de resposta do ERP em casos de erro
+				AAdd(aCH,ojCH)
+			else
+				If aRet[nX][14] <> 0
+					ojCH	:= JsonObject():New()
+					ojCH['documentType']		:= nType								//1 - Report, 2 - Expense, 3 - AdvPayment
+					ojCH['documentId']			:= aRet[nX][1]							//Identificação do documento no ExpenseOn
+					ojCH['financeDocumentId']	:= aRet[nX][8]							//Numero do Titulo no ERP
+					ojCH['date']				:= ConvData(date())						//Data da alteração de status e/ou referência do documento
+					ojCH['status']			    := iif(aRet[nX][14]==3,8,aRet[nX][14])  //8 - Documento foi criado no ERP
+					//9 - Erro na criação do documento de Contas a Pagar no ERP
+					//3 - Documento financeiro foi pago com sucesso no Contas a Pagar no ERP
+					//4 - Documento financeiro foi encerrado com sucesso no Contas a Pagar no ERP
+					ojCH['message']				:= aRet[nX][9]							//Mensagem de resposta do ERP em casos de erro
+					AAdd(aCH,ojCH)
+				EndIf
+			endif
+		Next nX
+	EndIf
+
+	If nFase == 2
+		aCH := {}
+		For nX:=1 to nLenRet
+			if aRet[nX][15] // Se for 100% reembolsavel, mudo para status 4 obrigatóriamente para encerrar o processo
+				ojCH	:= JsonObject():New()
+				ojCH['documentType']		:= nType								//1 - Report, 2 - Expense, 3 - AdvPayment
+				ojCH['documentId']			:= aRet[nX][1]							//Identificação do documento no ExpenseOn
+				ojCH['financeDocumentId']	:= aRet[nX][8]							//Numero do Titulo no ERP
+				ojCH['date']				:= ConvData(date())						//Data da alteração de status e/ou referência do documento
+				ojCH['status']			    := 4                		            //8 - Documento foi criado no ERP
+				//9 - Erro na criação do documento de Contas a Pagar no ERP
+				//3 - Documento financeiro foi pago com sucesso no Contas a Pagar no ERP
+				//4 - Documento financeiro foi encerrado com sucesso no Contas a Pagar no ERP
+				ojCH['message']				:= aRet[nX][9]							//Mensagem de resposta do ERP em casos de erro
+				AAdd(aCH,ojCH)
+			else
+				If aRet[nX][14] == 3
+					ojCH	:= JsonObject():New()
+					ojCH['documentType']		:= nType								//1 - Report, 2 - Expense, 3 - AdvPayment
+					ojCH['documentId']			:= aRet[nX][1]							//Identificação do documento no ExpenseOn
+					ojCH['financeDocumentId']	:= aRet[nX][8]							//Numero do Titulo no ERP
+					ojCH['date']				:= ConvData(date())						//Data da alteração de status e/ou referência do documento
+					ojCH['status']			    := aRet[nX][14]                		    //8 - Documento foi criado no ERP
+					//9 - Erro na criação do documento de Contas a Pagar no ERP
+					//3 - Documento financeiro foi pago com sucesso no Contas a Pagar no ERP
+					//4 - Documento financeiro foi encerrado com sucesso no Contas a Pagar no ERP
+					ojCH['message']				:= aRet[nX][9]							//Mensagem de resposta do ERP em casos de erro
+					AAdd(aCH,ojCH)
+				EndIf
+			endif
+		Next nX
+	EndIf
+
+	If Len(aCH) > 0
+		ojRequest 	:= JsonObject():New()
+		ojRequest['changes'] := aCH
+
+		lRet := ::ProcRequest("/api/integration/document", "POST", ojRequest:toJson() )
+		If !lRet
+			For nX:=1 to nLenRet
+				aRet[nX,11] := ::cMensagemErro
+			Next nX
+		else
+			If !::ojRetorno['success']
+				For nX:=1 to nLenRet
+					aRet[nX,11] := "Cod: "+::ojRetorno['error_code']+": "+::ojRetorno['error_type']+" - "+::ojRetorno['error_description']
+				Next nX
+			Else
+				aRetCH := ::ojRetorno['data']
+				For nX:=1 to Len(aRetCH)
+					cCod	:= aRetCH[nX]['documentId']
+					nPRet	:= aScan( aRet , {|x| Alltrim(x[1]) == Alltrim(cCod) } )
+					If nPRet > 0
+						aRet[nPRet,11] := "SUCESSO"
+					EndIf
+				Next nX
+			EndIf
+		EndIf
+
+	EndIf
+
+Return(.T.)
+
+
+Method PostChangPG(cIdRef,cChvSE2,nType) CLASS ExpenseOn
+
+	Local lRet		:= .F.
+	Local aCH    	:= {}
+	Local ojCH 		:= Nil
+	Local ojRequest	:= Nil
+	Local cErro     := ""
+
+	ojCH := JsonObject():New()
+	ojCH['documentType']		:= nType								//1 - Report, 2 - Expense, 3 - AdvPayment
+	ojCH['documentId']			:= cIdRef							    //Identificação do documento no ExpenseOn
+	ojCH['financeDocumentId']	:= cChvSE2  							//Numero do Titulo no ERP
+	ojCH['date']				:= ConvData(date())						//Data da alteração de status e/ou referência do documento
+	ojCH['status']				:= 3                             		//8 - Documento foi criado no ERP
+	//9 - Erro na criação do documento de Contas a Pagar no ERP
+	//3 - Documento financeiro foi pago com sucesso no Contas a Pagar no ERP
+	//4 - Documento financeiro foi encerrado com sucesso no Contas a Pagar no ERP
+	ojCH['message']				:= ""       							//Mensagem de resposta do ERP em casos de erro
+	AAdd(aCH,ojCH)
+
+	If Len(aCH) > 0
+		ojRequest 	:= JsonObject():New()
+		ojRequest['changes'] := aCH
+
+		lRet := ::ProcRequest("/api/integration/document", "POST", ojRequest:toJson() )
+
+		If !lRet
+			cErro := ::cMensagemErro
+		Else
+			If !::ojRetorno['success']
+				cErro := "Cod: "+::ojRetorno['error_code']+": "+::ojRetorno['error_type']+" - "+::ojRetorno['error_description']
+			EndIf
+		EndIf
+
+	EndIf
+
+Return(cErro)
+
+
+Static Function GrvBXPA(aRecPA)
+
+	Local aBaixa    := {}
+	Local aAreaAtu  := getarea()
+	Local cBanco    := ZZH->ZZH_BANCO
+	Local cAgencia  := ZZH->ZZH_AGENCI
+	Local cConta    := ZZH->ZZH_CONTA
+	Local cHistBx   := ""
+	Local aRetLog	:= {}
+	Local cRet      := ""
+	Local cTexto    := ""
+	Local nC        := 0
+	Local aRetBX    := {}
+
+	DBSelectArea("SE2")
+	SE2->(DBGoto(aRecPA[1]))
+
+	AADD(aBaixa, {"E2_FILIAL"   , SE2->E2_FILIAL    , Nil})
+	AADD(aBaixa, {"E2_PREFIXO"  , SE2->E2_PREFIXO   , Nil})
+	AADD(aBaixa, {"E2_NUM"      , SE2->E2_NUM       , Nil})
+	AADD(aBaixa, {"E2_PARCELA"  , SE2->E2_PARCELA   , Nil})
+	AADD(aBaixa, {"E2_TIPO"     , SE2->E2_TIPO      , Nil})
+	AADD(aBaixa, {"E2_FORNECE"  , SE2->E2_FORNECE   , Nil})
+	AADD(aBaixa, {"E2_LOJA"     , SE2->E2_LOJA      , Nil})
+
+	AADD(aBaixa, {"AUTMOTBX"    , "NOR"             , Nil})
+	AADD(aBaixa, {"AUTBANCO"    , cBanco            , Nil})
+	AADD(aBaixa, {"AUTAGENCIA"  , cAgencia          , Nil})
+	AADD(aBaixa, {"AUTCONTA"    , cConta            , Nil})
+	AADD(aBaixa, {"AUTDTBAIXA"  , dDataBase         , Nil})
+	AADD(aBaixa, {"AUTDTCREDITO", dDataBase         , Nil})
+	AADD(aBaixa, {"AUTHIST"     , cHistBx           , Nil})
+	AADD(aBaixa, {"AUTVLRPG"    , SE2->E2_SALDO     , Nil})
+
+	lMSHelpAuto     := .T. //.F. // para nao mostrar os erro na tela
+	lMSErroAuto     := .F. //.F. // inicializa como falso, se voltar verdadeiro e' que deu erro
+	lAutoErrNoFile 	:= .T.
+
+	MSExecAuto({|x,y| FINA080(x,y)}, aBaixa, 3)
+
+	If lMsErroAuto
+		aRetLog	:= GetAutoGrLog()
+		cRet    := "Erro na geração do titulo "
+		If Len(aRetLog) > 0
+			For nC := 1 To Len(aRetLog)
+				cTexto := AllTrim(aRetLog[nC])
+				cTexto := Replace(cTexto, chr(13)+chr(10), '|')
+				cTexto := Replace(cTexto, chr(10)+chr(13), '|')
+				cRet += cTexto
+			Next nC
+		EndIf
+		aRetBX := {.f.,cRet}
+	Else
+		aRetBX := {.t.,""}
+	EndIf
+
+	RestArea(aAreaAtu)
+
+Return(aRetBX)
+
+
+Static Function ValidaPayment(aDesp)
+
+	Local lRet      := .F.
+	Local nPagto    := 0
+	Local aAux      := {}
+
+	For nPagto := 1 to len(aDesp)
+		if empty(aAux)
+			aadd(aAux,aDesp[nPagto]['paymentMethodCode'])
+		else
+			nPosPayment := Ascan(aAux,aDesp[nPagto]['paymentMethodCode'])
+			if nPosPayment == 0
+				aadd(aAux,aDesp[nPagto]['paymentMethodCode'])
+			endif
+		endif
+	Next nPagto
+
+	if len(aAux) == 1
+		if aAux[len(aAux)] == "CORPCARD"
+			lRet := .T.
+		else
+			lRet := .F.
+		endif
+	Endif
+
+Return lRet
+
+
+//------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Method GetReportPayStatus(nStatus,dDtIni,dDtFim) CLASS ExpenseOn
+
+	Local lRet		:= .F.
+	Local cErro     := ""
+	Local cPath     := "/api/integration/report/status/"
+
+	default dDtIni  := CtoD("")
+	default dDtFim  := CtoD("")
+
+
+    aStatus := {'Aberto','Submetido','Aprovado','Reprovado','Reembolsado','WaitingFinanceProcess','ProcessingPayment','ErrorProcessingPayment'}
+
+	If Empty(dDtIni)
+		::cMensagemErro := 'Para consulta do relatorio no Flash Expense, informe data inicial do período.'
+		Return .F.
+	EndIf
+	If Empty(dDtFim)
+		::cMensagemErro := 'Para consulta do relatorio no Flash Expense, informe data final do período.'
+		Return .F.
+	EndIf
+	If dDtIni > dDtFim
+		::cMensagemErro := 'Para consulta do relatorio no Flash Expense, data inicial deve ser menor ou igual a data final do período.'
+		Return .F.
+	EndIf
+
+	cPath += alltrim(aStatus[nStatus])+ "?startDate=" + ConvData(dDtIni) + "&endDate=" + ConvData(dDtFim)
+	lRet := ::ProcRequest(cPath, "GET", "", .T. )
+
+	If !lRet
+		cErro := ::cMensagemErro
+	Else
+		If !::ojRetorno['success']
+			cErro := "Cod: "+::ojRetorno['error_code']+": "+::ojRetorno['error_type']+" - "+::ojRetorno['error_description']
+		EndIf
+	EndIf
+
+Return(cErro)
