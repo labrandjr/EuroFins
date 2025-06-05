@@ -1,0 +1,326 @@
+<html>
+	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.3.1/dist/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+<link href="//maxcdn.bootstrapcdn.com/bootstrap/3.3.0/css/bootstrap.min.css" rel="stylesheet" id="bootstrap-css">
+<script src="//maxcdn.bootstrapcdn.com/bootstrap/3.3.0/js/bootstrap.min.js"></script>
+<script src="//code.jquery.com/jquery-1.11.1.min.js"></script>
+
+<!------ Include the above in your HEAD tag ---------->
+
+	<style type="text/css">
+		h11 {
+			color:red;
+		}
+
+		.panel-heading{
+			font-size:200%;
+		}
+		
+		form{ 
+			margin-top: 0.5cm;
+			margin-left: 0.5cm;
+			margin-right: 0.5cm
+		}
+		
+		.grpAprv{
+			font-family: verdana;
+			font-size: 12px
+		}
+
+	</style>
+	
+<!DOCTYPE html>
+<head>
+
+    
+</head>
+<body>
+
+<form class="form-horizontal">
+	<fieldset>
+
+		<div class="panel panel-primary">
+			<div class="panel-heading">Cadastro de Fornecedor - Ficha: [ %ficha% ] </div>
+		</div>
+		
+		<div class="form-group">
+			<div class="col-md-2 control-label">
+				<h3>Dados Cadastrais</h3>
+			</div>
+		</div>
+
+
+		<!-- Text input-->
+		<div class="form-group">
+		  <label class="col-md-2 control-label" for="Nome">Nome</label>  
+		  <div class="col-md-8">
+		  <input id="Nome" name="Nome" class="form-control input-md" type="text" value="%nome%" readonly="readonly" style="background-color:#F6F6F6">
+		  </div>		
+		</div>
+
+		<div class="form-group">
+		  <label class="col-md-2 control-label" for="Nome">Nome Fantasia</label>  
+		  <div class="col-md-4">
+		  <input id="NReduz" name="NReduz" class="form-control input-md" required="" type="text" value="%NReduz%" readonly="readonly" style="background-color:#F6F6F6">
+		  </div>	
+		</div>
+
+		<!-- Text input-->
+		<div class="form-group">
+		  <label class="col-md-2 control-label" for="Nome">CNPJ</label>  
+			  <div class="col-md-2">
+				<input id="cnpj" name="cnpj" class="form-control input-md" type="text" value="%cnpj%" readonly="readonly" style="background-color:#F6F6F6">
+			  </div>
+
+		  <label class="col-md-3 control-label" for="Nome">Tipo Fornecedor</label>  
+			<div class="col-md-2">
+				<input id="tpFornece" name="tpFornece" class="form-control input-md" type="text" value="%tpFornece%" readonly="readonly" style="background-color:#F6F6F6">
+			</div>
+		</div>
+
+		<div class="form-group">
+			<label class="col-md-2 control-label" for="Nome">Tipo Fornecimento</label>  
+			<div class="col-md-5">
+				<input id="tpFornecimento" name="tpFornecimento" class="form-control input-md" type="text" value="%tpFornecimento%" readonly="readonly" style="background-color:#F6F6F6">
+			</div>
+		</div>	
+
+	<!-- Prepended text-->
+		<div class="form-group">
+			<label class="col-md-2 control-label" for="prependedtext">Telefone</label>
+			<div class="col-md-2">
+				<div class="input-group">
+				  <span class="input-group-addon"><i class="glyphicon glyphicon-earphone"></i></span>
+				  <input id="prependedtext" name="prependedtext" class="form-control" type="text" readonly="readonly" value="%telefone%" style="background-color:#F6F6F6">
+				</div>
+			</div>
+
+			<label class="col-md-2 control-label" for="prependedtext">Email</label>
+			<div class="col-md-5">
+				<div class="input-group">
+				  <span class="input-group-addon"><i class="glyphicon glyphicon-envelope"></i></span>
+				  <input id="prependedtext" name="prependedtext" class="form-control" type="text" readonly="readonly" value="%email%"  style="background-color:#F6F6F6" >
+				</div>
+			</div>
+		</div> 
+
+
+	<!-- Search input-->
+		<div class="form-group">
+			<label class="col-md-2 control-label" for="CEP">Emp. Coligada</label>
+			<div class="col-md-1">
+				<input id="coligada" name="coligada" class="form-control input-md" value="%coligada%" readonly="readonly" style="background-color:#F6F6F6">
+			</div>
+
+			<label class="col-md-2 control-label" for="CEP">CEP</label>
+			<div class="col-md-2">
+				<input id="cep" name="cep" class="form-control input-md" style="background-color:#F6F6F6" readonly="readonly" value="%cep%">
+			</div>
+
+			<label class="col-md-2 control-label" for="CEP">Pais</label>
+			<div class="col-md-2">
+				<input id="pais" name="pais" class="form-control input-md" readonly="readonly" value="%pais%" style="background-color:#F6F6F6">
+			</div>
+		</div>
+
+	<!-- Prepended text-->
+		<div class="form-group">
+			<label class="col-md-2 control-label" for="prependedtext">Endereço</label>
+			<div class="col-md-4">
+				<div class="input-group">
+				  <span class="input-group-addon">Rua</span>
+				  <input id="rua" name="rua" class="form-control" readonly="readonly" type="text" value="%endereco%" style="background-color:#F6F6F6">
+				</div>
+			</div>
+
+			<div class="col-md-3">
+				<div class="input-group">
+				  <span class="input-group-addon">Bairro</span>
+				  <input id="bairro" name="bairro" class="form-control" readonly="readonly" type="text" style="background-color:#F6F6F6" value="%bairro%">
+				</div>
+
+			</div>
+		</div>
+
+		<div class="form-group">
+			<label class="col-md-2 control-label" for="prependedtext"></label>
+			<div class="col-md-2">
+				<div class="input-group">
+					<span class="input-group-addon">Cod. Mun.</span>
+					<input id="codMun" name="codMun" class="form-control" value="%codMun%" readonly="readonly" type="text" style="background-color:#F6F6F6">
+				</div>	
+			</div>
+
+		<div class="col-md-4">
+			<div class="input-group">
+				<span class="input-group-addon">Municipio</span>
+				<input id="municipio" name="municipio" class="form-control" value="%municipio%" readonly="readonly" type="text" style="background-color:#F6F6F6">
+			</div>
+		</div>
+
+		<div class="col-md-3">
+			<div class="input-group">
+				<span class="input-group-addon">Estado</span>
+				<input id="estado" name="estado" class="form-control" readonly="readonly" type="text" style="background-color:#F6F6F6" value="%uf%">
+			</div>
+		</div>
+
+		</div>
+
+		<div class="form-group">
+			<label class="col-md-2 control-label" for="CEP">Inscrição Estadual</label>
+				<div class="col-md-3">
+				<input id="InscE" name="InscE" class="form-control input-md" readonly="readonly" value="%InscE%" style="background-color:#F6F6F6">
+			</div>
+
+			<label class="col-md-2 control-label" for="CEP">Inscrição Municipal</label>
+				<div class="col-md-3">
+				<input id="InscM" name="InscM" class="form-control input-md" readonly="readonly" value="%InscM%" style="background-color:#F6F6F6">
+			</div>
+		</div>
+
+		<div class="form-group">
+			<label class="col-md-2 control-label" for="CEP">Optante Simples Nacional</label>
+				<div class="col-md-1">
+				<input id="OpSim" name="OpSim" class="form-control input-md" readonly="readonly" value="%OpSim%" style="background-color:#F6F6F6">
+			</div>
+		</div>
+
+<hr>
+
+		<div class="form-group">
+			<div class="col-md-2 control-label">
+				<h3>Administrativo/Financeiro</h3>
+			</div>
+		</div>
+		
+		<div class="form-group">
+			<label class="col-md-2 control-label" for="CEP">Natureza Fin.</label>
+				<div class="col-md-3">
+				<input id="Naturez" name="Naturez" class="form-control input-md" readonly="readonly" value="%Naturez%" style="background-color:#F6F6F6">
+			</div>
+			
+			<label class="col-md-2 control-label" for="CEP">Conta Contábil</label>
+			<div class="col-md-3">
+				<input id="Conta" name="Conta" class="form-control input-md" readonly="readonly" value="%Conta%" style="background-color:#F6F6F6">
+			</div>			
+		</div>
+		
+		<div class="form-group">
+			<label class="col-md-2 control-label" for="CEP">Banco</label>
+				<div class="col-md-1">
+				<input id="Banco" name="Banco" class="form-control input-md" readonly="readonly" value="%Banco%" style="background-color:#F6F6F6">
+			</div>
+			
+			<label class="col-md-2 control-label" for="CEP">Agência</label>
+				<div class="col-md-1">
+				<input id="Agencia" name="Agencia" class="form-control input-md" readonly="readonly" value="%Agencia%" style="background-color:#F6F6F6">
+			</div>
+			
+			<label class="col-md-2 control-label" for="CEP">Conta Desp.</label>
+				<div class="col-md-1">
+				<input id="CtaDep" name="CtaDep" class="form-control input-md" readonly="readonly"  value="%CtaDep%" style="background-color:#F6F6F6">
+			</div>			
+		</div>		
+		
+		<hr>
+
+		<div class="form-group">
+			<div class="col-md-2 control-label">
+				<h3>Fiscal</h3>
+			</div>
+		</div>
+		
+		<div class="form-group">
+			<label class="col-md-2 control-label" for="CEP">Pais Bacen</label>
+				<div class="col-md-2">
+				<input id="bacen" name="bacen" class="form-control input-md" value="%bacen%" readonly="readonly" style="background-color:#F6F6F6">
+			</div>
+			
+			<label class="col-md-2 control-label" for="CEP">Constribuinte ICMS</label>
+				<div class="col-md-1">
+				<input id="contrib" name="contrib" class="form-control input-md" value="%contrib%" readonly="readonly" style="background-color:#F6F6F6">
+			</div>
+		</div>	
+		
+		
+		<div class="form-group">
+			<label class="col-md-2 control-label" for="CEP">PIS</label>
+				<div class="col-md-1">
+				<input id="pis" name="pis" class="form-control input-md" value="%pis%" readonly="readonly" style="background-color:#F6F6F6">
+			</div>
+			
+			<label class="col-md-2 control-label" for="CEP">Cofins</label>
+				<div class="col-md-1">
+				<input id="Cofins" name="Cofins" class="form-control input-md" value="%Cofins%" readonly="readonly" style="background-color:#F6F6F6">
+			</div>	
+		</div>
+		
+		<div class="form-group">
+			<label class="col-md-2 control-label" for="CEP">CSLL</label>
+				<div class="col-md-1">
+				<input id="csll" name="csll" class="form-control input-md" value="%csll%" readonly="readonly" style="background-color:#F6F6F6">
+			</div>
+			
+			<label class="col-md-2 control-label" for="CEP">IRRF</label>
+				<div class="col-md-1">
+				<input id="irrf" name="irrf" class="form-control input-md" value="%irrf%" readonly="readonly" style="background-color:#F6F6F6">
+			</div>			
+		</div>			
+		
+	<hr>
+
+	<br>
+		
+	<table width="70%" border="0" cellspacing="0" align="center">
+		<tbody>
+			<tr>
+			<td>
+			<div class="form-group">
+			  <label for="comment">Observação:</label>
+			  <textarea class="form-control" rows="3" id="motivo" name="motivo" value="%motivo%" placeholder="Informe o texto a ser enviado ao solicitante..."></textarea>
+			</div>
+			</td>
+			</tr>
+		</tbody>
+	</table>
+
+		
+	<div class="container-fluid">
+		<div class="row">
+			<div class="col-md-12">
+				<button type="submit" name="%aprova%" value="A" class="btn btn-block btn-outline-success">
+					APROVAR
+				</button> 
+			</div>
+		</div>
+		<div class="row">
+			<div class="col-md-12">
+				<button type="submit" name="%aprova%" value="R" class="btn btn-block btn-outline-danger">
+					REPROVAR
+				</button> 
+			</div>
+		</div>
+	</div>
+		
+			<br/>
+	<hr>
+	<table width="30%" border="0" cellspacing="2" class="grpAprv">
+	  <tbody>
+		<tr>
+		  <td width="50%">APROVADOR : </td>
+		  <td>%puid%</td>
+		</tr>
+		<tr>
+		  <td>GRUPO APROVAÇÃO : </td>
+		  <td>%grpAprov%</td>
+		</tr>
+	  </tbody>
+	</table>
+
+	</fieldset>
+</form>
+
+
+
+</body>
+</html>

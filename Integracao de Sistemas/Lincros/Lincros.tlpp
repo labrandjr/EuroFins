@@ -1,0 +1,1715 @@
+#INCLUDE "PROTHEUS.CH"
+#Include 'Topconn.ch'
+
+#Define CTE_FILIAL      1
+#Define CTE_NOMEFIL     2
+#Define CTE_IDCTE       3
+#Define CTE_NUMERO      4
+#Define CTE_SERIE       5
+#Define CTE_CNPJ        6
+#Define CTE_NOMEFOR     7
+#Define CTE_EMISSAO     8
+#Define CTE_VALOR       9
+#Define CTE_STATUSINT   10
+#Define CTE_MSGERRO     11
+#Define CTE_STATUS      12
+#Define CTE_CHAVEMONT   13
+#Define CTE_CODIGOZZL   14
+
+#Define FAT_FILIAL      1
+#Define FAT_NOMEFIL     2
+#Define FAT_IDCTE       3
+#Define FAT_NUMERO      4
+#Define FAT_SERIE       5
+#Define FAT_CNPJ        6
+#Define FAT_NOMEFOR     7
+#Define FAT_EMISSAO     8
+#Define FAT_VALOR       9
+#Define FAT_STATUSINT   10
+#Define FAT_MSGERRO     11
+#Define FAT_STATUS      12
+#Define FAT_CHAVEMONT   13
+#Define FAT_CODIGOZZL   14
+
+/*/{Protheus.doc} Lincros
+
+Classe para realizar a tratamentos de integracao com a Lincros
+
+@type class
+@author	Sergio IP
+@since	09/2022
+/*/
+
+Class Lincros
+    
+    Private Data cUrl               as Character
+    Private Data cToken     		as Character
+    Private Data cStatusCode		as Character
+	Private Data cMensagemErro		As Character
+    Private Data nTimeOut 			as Numeric
+    Private Data aHeaderRequisicao	as Array
+    Private Data aRet				as Array
+    Private Data aRetFat        	as Array
+    Private Data aCTEs    			as Array
+    Private Data aFATs    			as Array
+    Private Data ojRetorno
+    Private Data cQueryPC           as Character
+
+	Private Method ProcRequest()
+
+	Public Method New() Constructor
+    Public Method GetErro()
+    Public Method GetRetornoApi()
+	Public Method GetRetornoArrayCTE()
+    Public Method GetRetornoArrayFatura()
+    Public Method GetStatusCode()
+
+    //Metodos de CTE
+    Public Method GetCtes()
+    Public Method CtesIds()
+    Public Method GetArrayCtes()
+    Public Method PostDadosCtes()
+    Public Method GrvCtes()
+    Public Method AtuStatusCtes()
+    Public Method CriaQueryPC()
+
+    //Metodos de Fatura
+    Public Method GetFaturas()
+    Public Method FaturasIds()
+    Public Method GetArrayFaturas()
+    Public Method PostDadosFaturas()
+    Public Method GrvFatura()
+    Public Method AtuStatusFatura()
+
+EndClass
+
+Method New() CLASS Lincros
+
+	::cUrl				:= Alltrim(SuperGetMV("ZZ_LINCR01",.F.,"https://deployment.transpofrete.com.br"))•
+    ::cToken        	:= Alltrim(SuperGetMV("ZZ_LINCR02",.F.,"M5rQhTaZj1ZKy6pU4YpRMPP1xEtLZamZWPog9KdOgS"))
+	::cMensagemErro		:= ""
+	::cStatusCode		:= ""
+    ::cQueryPC          := ""
+
+	::aHeaderRequisicao	:= {}
+	::aRet				:= {}
+    ::aRetFat       	:= {}
+	::aCTEs  			:= {}
+	::aFATs  			:= {}
+
+	::nTimeOut			:= 15
+
+	::ojRetorno			:= Nil
+
+Return self
+
+
+Method GetErro() CLASS Lincros
+Return(::cMensagemErro)
+
+Method GetRetornoApi() CLASS Lincros
+Return(::ojRetorno)
+
+Method GetRetornoArrayCTE() CLASS Lincros
+Return(::aRet)
+
+Method GetRetornoArrayFatura() CLASS Lincros
+Return(::aRetFat)
+
+Method GetStatusCode() CLASS Lincros
+Return(::cStatusCode)
+
+/*
+    Processa Request da integração
+*/
+Method ProcRequest(cPathConsulta, cMetodo, cParametros, lUneHostPath) CLASS Lincros
+
+    Local lRetorno 			:= .T.
+    Local oRestCliente 		:= Nil
+    Local nInicio 			:= 0
+    Local nRetentativaTimeout := 0
+    Local cHost             := ::cUrl
+
+    DEFAULT lUneHostPath    := .F.
+
+    If lUneHostPath
+        cHost           := cHost + cPathConsulta
+        cPathConsulta   := ""
+    EndIf
+    oRestCliente 		:= FWRest():New(cHost)
+
+    oRestCliente:nTimeOut := ::nTimeOut
+
+	If Empty(::cToken)
+        ::cMensagemErro := "Não foi castrado o token  - Erro:"+;
+        FreeObj(oRestCliente)
+        Return(.F.)
+    endif
+
+    // Monta o Header
+    Aadd(::aHeaderRequisicao,'authorization: Bearer '+::cToken)
+    
+    nInicio = Seconds()
+
+    if cMetodo == "POST"
+        aadd(::aHeaderRequisicao,'Content-Type: application/json')
+        oRestCliente:setPath(cPathConsulta)
+        if !Empty(cParametros)
+            oRestCliente:SetPostParams(cParametros)
+        endif
+        oRestCliente:Post(::aHeaderRequisicao)
+
+    elseif cMetodo == "PUT"
+        aadd(::aHeaderRequisicao,'Content-Type: application/json')
+        oRestCliente:setPath(cPathConsulta)
+        oRestCliente:put(::aHeaderRequisicao,cParametros)
+    
+    elseif cMetodo == "GET"
+        aadd(::aHeaderRequisicao,'Content-Type: application/x-www-form-urlencoded')
+        oRestCliente:setPath(cPathConsulta+cParametros)
+        oRestCliente:Get(::aHeaderRequisicao)
+        If oRestCliente:oResponseh:cStatusCode <> "200"
+            ::cStatusCode := oRestCliente:oResponseh:cStatusCode
+            ::cMensagemErro := 'Não foi possível obter a resposta da solicitação. - 401 ' 
+            lRetorno := .F.
+        EndIf
+    endif
+
+    nRetentativaTimeout := Seconds() - nInicio
+
+    If lRetorno
+
+        cJson := DecodeUTF8(oRestCliente:GetResult())
+
+        If !empty(cJson)
+            ::ojRetorno := JsonObject():New()
+            cMsgJso := ::ojRetorno:fromJson(cJson)
+            If !empty(cMsgJso)
+                ::cMensagemErro := 'Json parser error'
+                lRetorno := .F.
+            EndIf
+        else
+            ::cMensagemErro := 'Não foi possível obter a resposta da solicitação. Tente novamente'
+            lRetorno := .F.
+        EndIf
+
+        ::cStatusCode := oRestCliente:oResponseh:cStatusCode
+    EndIf
+
+
+    FreeObj(oRestCliente)
+
+Return lRetorno
+
+/*
+    Checa a filial
+*/
+Static Function ChkFilial(cFilCGC)
+
+    Local cFilReg := ""
+
+	If Empty(cFilCGC)
+		Return .F.
+	EndIf
+
+	If Select('SM0') == 0
+		OpenSM0()
+	EndIf
+
+	dbSelectArea( "SM0" )
+	dbSetOrder( 1 )
+	dbGoTop()
+
+	While !SM0->( EOF() )
+        If SM0->M0_CGC == cFilCGC
+            cFilReg := SM0->M0_CODFIL
+            Exit 
+        EndIf    
+		SM0->(dbSkip())
+	End
+
+	SM0->(DbSetOrder(1))
+	If !SM0->(MsSeek(cEmpAnt + cFilReg))
+		SM0->(MsSeek(cEmpAnt + cFilAnt))
+		Return .F.
+	EndIf
+   
+	cFilAnt := cFilReg
+
+Return .T.
+
+/*
+    Busca CTES pendentes de integração
+*/
+Method GetCtes() CLASS Lincros
+
+    Local lRet		:= .F.
+    Local cPath     := "/api/cte/buscarRegistrosParaIntegracao/999"
+
+    lRet := ::ProcRequest(cPath, "GET", "", .T. )
+
+Return(lRet)
+
+/*
+    Busca ID de CTES pendentes de integração
+*/
+Method CtesIds() CLASS Lincros
+
+    Local lRet		:= .T.
+    Local oCtes     := ::ojRetorno
+    Local nLenCte   := 0
+
+    ::aCTEs := oCtes['ctes']
+    nLenCte	:= Len(::aCTEs)
+    If nLenCte == 0
+        ::cMensagemErro := 'Não existem CTEs para serem Integrados.'
+        Return .F.
+    EndIf
+
+Return(lRet)
+
+Method GetArrayCtes() CLASS Lincros
+Return(::aCTEs)
+
+
+Method PostDadosCtes(idCTE) CLASS Lincros
+
+    Local lRet		:= .F.
+    Local cPath     := "/api/cte/recuperarDados"
+    Local ojRequest := JsonObject():New()
+
+    ojRequest['cte'] := idCTE
+        
+    lRet := ::ProcRequest(cPath, "POST", ojRequest:toJson() )
+
+Return(lRet)
+
+/*
+    Rotina que grava os dados dos CTEs na integração
+*/
+Method GrvCtes(cIdCte) CLASS Lincros
+
+    Local nLenCte   := 0
+    Local nX        := 0
+    Local nR        := 0
+    Local nY        := 0
+    Local aCCustos  := {}
+    Local oCC       := Nil
+    Local cErrCC    := ""
+    Local cCodPgto  := Alltrim(SuperGetMV("ZZ_LINCR10",.F.,"090"))
+    Local oQueryPC  := Nil
+    Local cCodFor   := ""
+    Local cLojFor   := ""
+    Local cErroPC   := ""
+    Local aCabec    := {}
+    Local aTotItens := {}
+    Local aItens    := {}
+    Local aRetLog	:= {}
+    Local cRet      := ""
+    Local nC        := 0
+    Local cTexto    := ""
+
+    Local cNumCte   := ""
+    Local dEMisCte  := ctod("")
+    Local cSerie    := ""
+    Local cTpCTE    := ""
+    Local cModal    := ""
+    Local nValorCTE := 0
+    Local cCHVNFE   := ""
+    Local nVlrIcms  := 0
+    Local nAliqICms := 0
+    Local aRateio   := {}
+    Local cAliasTmp := ""
+    Local cFinalQuery := ""
+    Local cUFOriTR  := "" 
+    Local cMUOriTR  := ""
+    Local cUFDesTR  := "" 
+    Local cMUDesTR  := "" 
+    Local cCodDes   := ""
+    Local cCodOri   := ""
+    Local cCFOP     := ""
+    Local lJaIntegr := .F. //Variável para controlar se o CTE já estava integrado ou não
+
+    Local lContinua := .T.
+    Local cErro     := ""
+
+    Local nPerc     := 0
+
+    Local cTESSL := Alltrim(SuperGetMV("ZZ_LINCR03",.F.,"046"))
+    Local cTESSG := Alltrim(SuperGetMV("ZZ_LINCR04",.F.,"047"))
+
+    Local oRetInt   := Nil
+
+    Private oCte    := ::ojRetorno
+    Private aCTE    := {}
+
+    Private cCodZZL := ""
+
+    geraLog(Replicate("*",20))
+	geraLog("Iniciando integração de CTE's")
+	geraLog(Replicate("*",20))
+
+    Begin Transaction
+
+        lJaIntegr := .F.
+
+        If oCte:GetJsonObject("status") <> nil
+            ::cMensagemErro := oCte:GetJsonObject("mensagem")
+            Return .F.
+        EndIf
+
+        If oCte:GetJsonObject("ctes") == nil
+            ::cMensagemErro := 'Não existem Dados para essa CTE para serer Integrados. |'
+            Return .F.
+        EndIf
+
+        aCTE     := oCte['ctes']
+        nLenCte	 := Len(aCTE)
+        If nLenCte == 0
+            ::cMensagemErro := 'Não existem Dados para essa CTE para serer Integrados. |'
+            Return .F.
+        EndIf
+
+        ::aRet := {} // zera array de retorno
+        For nX:=1 to nLenCte
+            AAdd(::aRet, {;
+                            "0000"                          ,;  // 1 - Filial
+                            ""                              ,;  // 2 - nome filial
+                            cIdCte                          ,;  // 3 - ID CTE
+                            aCTE[nX]['numero']		        ,;	// 4 - NUMERO CTE
+                            aCTE[nX]['serie']	            ,;	// 5 - SERIE DA CTE
+                            aCTE[nX]['cnpjTransportadora']	,;	// 6 - CNPJ FORNEC
+                            ""                              ,;  // 7 - NOME FORNECE
+                            CTOD("")                        ,;  // 8 - EMISSAO CTE
+                            0                               ,;  // 9 - VALOR CTE
+                            0                               ,;  // 10 - Cod Status 0-Integrado 2-Erro
+                            ""					            ,;	// 11 - Msg Erro
+                            ""                              ,;  // 12 - Status
+                            ""                              ,;  // 13 - CHave (Filial+Doc+Serie+Fornecedor+Loja) Para limpar o monitor caso a integração aconteceça normalmente.
+                            ""                              ,;  // 14 - CODIGO ZZL
+                            } )
+            
+            nR := Len(::aRet)
+
+            //Validando Filial do CTE
+            geraLog("Validando FILIAL")
+            If !ChkFilial(aCTE[nX]['cnpjUnidade'])
+                ::aRet[nR,CTE_STATUSINT]:= 2
+                ::aRet[nR,CTE_MSGERRO]  := "Cnpj da Unidade "+aCTE[nX]['cnpjUnidade'] + " não cadastrada para Integração. |"
+                cErro += ::aRet[nR,CTE_MSGERRO] + CRLF
+                lContinua := .F.
+                geraLog("Erro FILIAL: "+cErro)
+            Else
+                ::aRet[nR,CTE_FILIAL]   := cFilAnt
+                ::aRet[nR,CTE_NOMEFIL]  := FwFilialName( ,cFilAnt, 1 )
+            EndIf
+
+            //Consulta fornecedor
+            if lContinua
+                geraLog("Validando FORNECEDOR")
+                If Empty(aCTE[nX]['cnpjTransportadora'])
+                    ::aRet[nR,CTE_STATUSINT] := 2
+                    ::aRet[nR,CTE_MSGERRO] := "Cnpj do Fornecedor não informado. |"
+                    cErro += ::aRet[nR,CTE_MSGERRO] + CRLF
+                    lContinua := .F.
+                    geraLog("Erro FORNCEDOR: "+cErro)
+                Else
+                    SA2->(DbSetOrder(3)) //A2_FILIAL+A2_CGC
+                    If !SA2->(DbSeek(FWxFilial("SA2")+aCTE[nX]['cnpjTransportadora']) )
+                        ::aRet[nR,CTE_STATUSINT] := 2
+                        ::aRet[nR,CTE_MSGERRO] := "Fornecedor não encontrado com o CNPJ "+aCTE[nX]['cnpjTransportadora']+". |"
+                        cErro += ::aRet[nR,CTE_MSGERRO] + CRLF
+                        lContinua := .F.
+                        geraLog("Erro FORNCEDOR: Fornecedor não encontrado")
+                    Else
+                        cCodFor := SA2->A2_COD
+                        cLojFor := SA2->A2_LOJA
+                        ::aRet[nR,CTE_NOMEFOR] := AllTrim(SA2->A2_NOME)
+                        geraLog("Fornecedor: "+cCodFor+"/"+cLojFor+" - "+SA2->A2_NOME)
+                    EndIf
+                EndIf
+            endif
+
+            cNumCte     := strzero(aCTE[nX]['numero'],9)
+            dEMisCte    := StoD(StrTran(SubStr(aCTE[nX]['dataEmissao'],1,10),"-",""))
+            if isDigit(aCTE[nX]['serie'])
+                cSerie      := StrZero(Val(aCTE[nX]['serie']),TamSx3("F1_SERIE")[1])
+                //cSerie      := StrZero(Val(aCTE[nX]['serie']),2)
+            else
+                cSerie      := aCTE[nX]['serie']
+            endif
+
+            if aCTE[nX]['modal'] == "ROD"
+                cModal := "01"
+            elseif aCTE[nX]['modal'] == "AER"
+                cModal := "02"
+            elseif aCTE[nX]['modal'] == "AQUA"
+                cModal := "03"
+            elseif aCTE[nX]['modal'] == "FERR"
+                cModal := "04"
+            elseif aCTE[nX]['modal'] == "DUTO"
+                cModal := "05"
+            endif
+            
+            if aCTE[nX]['tipoCTe'] == 0
+                cTpCTE := "N"
+            elseif aCTE[nX]['tipoCTe'] == 1
+                cTpCTE := "C"
+            elseif aCTE[nX]['tipoCTe'] == 2
+                cTpCTE := "A"
+            elseif aCTE[nX]['tipoCTe'] == 3
+                cTpCTE := "S"
+            else
+                cTpCTE := ""
+            endif
+            nValorCTE   := Round( aCTE[nX]['valorDocumento'],TamSX3("D1_TOTAL")[2]) 
+            cCHVNFE     := aCTE[nX]['chave']
+            
+            geraLog("CTE:       "+cNumCte)
+            geraLog("Serie:     "+cSerie)
+            geraLog("Valor:     "+CValToChar(nValorCTE))
+            geraLog("Tipo CTE:  "+cTpCTE)
+            geraLog("Tipo CTE:  "+cTpCTE)
+            
+            if aCTE[nX]['valorIcms'] <> Nil
+                nVlrIcms    := Round( aCTE[nX]['valorIcms'],TamSX3("D1_BASEICM")[2]) 
+            else
+                nVlrIcms    := 0
+            endif
+
+            //CFOP, faço a troca do CFOP de Saída pelo de entrada
+            cCFOP       := cValtochar(aCTE[nX]['cfop'])
+            if cCFOP == "5353"
+                cCFOP := "1353"
+            elseif cCFOP == "5932"
+                cCFOP := "1932"
+            endif
+
+            //Valida o CFOP
+            if lContinua
+                if Empty(cCfop)
+                    ::aRet[nR,CTE_STATUSINT] := 2
+                    ::aRet[nR,CTE_MSGERRO]  += "CFOP inválido. |"
+                    lContinua := .F.
+                    geraLog("Erro: "+::aRet[nR,CTE_MSGERRO])
+                else
+                    geraLog("CFOP: "+cCfop)
+                endif
+            endif
+
+            ::aRet[nR,CTE_EMISSAO]  := dEMisCte
+            ::aRet[nR,CTE_VALOR]    := nValorCTE
+
+            If Type("aCTE[1]['valorAliquotaIcms']") != 'U'
+                nAliqICms   := Round( aCTE[nX]['valorAliquotaIcms'],TamSX3("D1_PICM")[2])  
+            Else    
+                nAliqICms   := 0 
+            EndIf
+
+            geraLog("Validando Centro de Custos")
+            If Type("aCTE[1]['centrosCustos']") <> 'A'
+                ::aRet[nR,CTE_STATUSINT] := 2
+                ::aRet[nR,CTE_MSGERRO] += "Centros de Custos não informados. |"
+                lContinua := .F.
+                geraLog("Erro: "+::aRet[nR,CTE_MSGERRO])
+            EndIf
+
+            if lContinua
+                aCCustos    := aCTE[nX]['centrosCustos']
+                cErrCC      := ""
+                cErroPC     := ""
+                aCabec      := {}
+                aTotItens   := {}
+                aItens      := {}
+                aRateio     := {}
+
+                //Validação dos C.Custos
+                if !Empty(aCCustos)
+                    For nY := 1 to Len(aCCustos)
+                        oCC := aCCustos[nY]
+                        cCCusto := Alltrim(oCC['codigo'])
+                        cDescCC := oCC['descricao']
+                        nVlrCC  := Round( oCC['valorFreteRealizado'],TamSX3("D1_TOTAL")[2])
+                        nPerc   := oCC['percentualRateio']
+
+                        if (nPerc == Nil .or. nPerc <= 0) 
+                            if Len(aCCustos) == 1
+                                nPerc := 100
+                            else
+                                ::aRet[nR,CTE_STATUSINT]    := 2
+                                ::aRet[nR,CTE_MSGERRO]      += "Percentual de rateio não informado para o CC "+cCCusto+" |"
+                                lContinua := .F.
+                                geraLog("Erro: "+::aRet[nR,CTE_MSGERRO])
+                            endif
+                        endif
+
+                        if lContinua
+                            CTT->(DbSetOrder(1)) //CTT_FILIAL+CTT_CUSTO
+                            If !CTT->(DbSeek(FWxFilial("CTT")+AvKey(cCCusto,"CTT_CUSTO") ) )
+                                cErrCC += "| CC invalido "+cCCusto+" "+cDescCC+" "
+                                lContinua := .F.
+                                geraLog("Erro: "+cErrCC)
+                            Else
+                                If CTT->CTT_CLASSE <> '2'
+                                    cErrCC += "| CC não Analitica "+cCCusto+" "+cDescCC+" "
+                                    lContinua := .F.
+                                    geraLog("Erro: "+cErrCC)
+                                EndIf
+                            EndIf
+
+                            if lContinua
+                                GeraRateio(nY,aCCustos,@aRateio,nValorCTE,nPerc)
+                            Endif
+                        endif
+
+                    Next nY
+                else
+                    ::aRet[nR,CTE_STATUSINT] := 2
+                    ::aRet[nR,CTE_MSGERRO] += "CTE "+cNumCte+" não tem centro de custo vinculado | "
+                    geraLog("Erro: "+::aRet[nR,CTE_MSGERRO])
+                    lContinua := .F.
+                endif
+
+                //Preenche array de Rateio
+                if lContinua
+                    For nY := 1 to len(aRateio)
+                        aadd(aRateio[nY],"")
+                        aadd(aRateio[nY],"")
+                        aadd(aRateio[nY],"")
+                        aadd(aRateio[nY],"")
+                        aadd(aRateio[nY],"")
+                        aadd(aRateio[nY],"")
+                    Next nY
+                endif
+
+                If !Empty(cErrCC)
+                    ::aRet[nR,CTE_STATUSINT] := 2
+                    ::aRet[nR,CTE_MSGERRO] += cErrCC
+                    geraLog("Erro: "+cErrCC)
+                    lContinua := .F.
+                EndIf
+
+                if lContinua
+                    geraLog("Validando Pedido de Compras")
+                    //Validação e Busca dos Pedidos de Compras por C.Custo
+                    oQueryPC := ::CriaQueryPC()
+
+                    For nY := 1 to Len(aRateio)
+                        cAliasTmp := ""
+                        oQueryPC:SetString(1,cFilAnt)           //filial
+                        oQueryPC:SetString(2,cCodFor)           //Cod.Fornecedor
+                        oQueryPC:SetString(3,cLojFor)           //Loja Fornecedor
+                        oQueryPC:SetString(4,aRateio[ny][1])    //C.Custo
+                        oQueryPC:SetNumeric(5,aRateio[ny][2])   //Valor
+
+                        cFinalQuery := oQueryPC:GetFixQuery()
+
+                        cAliasTmp := MpSysOpenQuery(cFinalQuery)
+
+                        If (cAliasTmp)->(!EOF())
+                            aRateio[nY][03] := (cAliasTmp)->C7_NUM
+                            aRateio[nY][04] := (cAliasTmp)->C7_ITEM
+                            aRateio[nY][05] := (cAliasTmp)->C7_PRODUTO
+                            aRateio[nY][06] := (cAliasTmp)->C7_ZZTIPO
+                            aRateio[nY][07] := IIF((cAliasTmp)->C7_ZZTIPO == "SL",cTESSL,cTESSG)
+                            //cCodPgto := (cAliasTmp)->C7_COND
+                            
+                            //Abaixo faço a validação de CFOP novamente, a pedido da Natacha sempre trocar o CFOP que começa com 6 por 2 e 5 por 1
+                            //Caso não ache o CTE na SX5, leva a CFOP da tes
+                            if !cCFOP $ "1932/1353"
+                                cCFOP := IIF(Left(cCFOP,1)=="5","1"+Right(cCFOP,3),"2"+Right(cCFOP,3))
+                                if Alltrim(GetAdvfval("SX5","X5_DESCRI",xFilial("SX5")+"13"+cCFOP,1,"")) == ""
+                                    cCFOP := GetAdvfval("SF4","F4_CF",xFilial("SF4")+aRateio[nY][07],1,"")
+                                    if Alltrim(SA2->A2_EST) <> Alltrim(getMv("MV_ESTADO")) .and. SubStr(cCFOP,1,1) == "1"
+                                        cCFOP := "2"+SubStr(cCFOP,2,3)
+                                    endif
+                                    geraLog("Alterado a TES para "+cCFOP+", a TES que estava na integração não é válida")
+                                endif
+                                aRateio[nY][08] := cCFOP
+                            else
+                                aRateio[nY][08] := cCFOP
+                            endif
+                        Else
+                            cErroPC += "| Sem Saldo para CC "+aRateio[nY][01]+" para pedido de compras do fornecedor "
+                            geraLog("Erro: "+cErroPC)
+                        EndIf
+
+                        (cAliasTmp)->( dbCloseArea() )
+
+                    Next nY
+
+                    oQueryPC:Destroy()
+
+                    If !Empty(cErroPC)
+                        ::aRet[nR,CTE_STATUSINT] := 2
+                        ::aRet[nR,CTE_MSGERRO] += cErroPC
+                        geraLog("Erro: "+cErroPC)
+                        lContinua := .F.
+                    EndIf
+                endif
+            endif
+
+            if lContinua
+
+                //Verifica se a nota já existe no sistema
+                SF1->(dbSetOrder(1))
+                If SF1->(DbSeek(FWxFilial("SF1")+cNumCte+Padr(cSerie,3)+cCodFor+cLojFor))
+                    ::aRet[nR,CTE_STATUSINT] := 2
+                    ::aRet[nR,CTE_MSGERRO] += "CTE "+cNumCte+" já estava integrado no sistema. |"
+                    lJaIntegr := .T.
+                    ::aRet[nR,CTE_CHAVEMONT] := SF1->F1_FILIAL+SF1->F1_DOC+SF1->F1_SERIE+SF1->F1_FORNECE+SF1->F1_LOJA
+                    geraLog("Erro: "+::aRet[nR,CTE_MSGERRO])
+                    lContinua := .F.
+                EndIf
+
+                //Busca dados de Cod do municipio de destino e origem
+                cCodDes := AllTrim(cValToChar(aCTE[nX]['codIbgeDestino']))
+                cCodOri := AllTrim(cValToChar(aCTE[nX]['codIbgeOrigem']))
+                if Empty(cCodDes) .or. Empty(cCodOri) .or. cCodOri == "0" .or. cCodDes == "0"
+                    ::aRet[nR,CTE_STATUSINT] := 2
+                    ::aRet[nR,CTE_MSGERRO] += "CTE "+cNumCte+" está sem o estado/Código IBGE de origem ou destino preenchido. |"
+                    geraLog("Erro: "+::aRet[nR,CTE_MSGERRO])
+                    lContinua := .F.
+                else
+                    cUFOriTR := CTEUF(Left(cCodOri,2))
+                    cMUOriTR := substr(cCodOri,3,5) 
+                    cUFDesTR := CTEUF(Left(cCodDes,2))
+                    cMUDesTR := substr(cCodDes,3,5)
+                endif
+            endif
+
+            geraLog("Montando Array para o ExecAuto MATA103")
+            aadd(aCabec,{"F1_TIPO"   ,"N"                   ,Nil})
+            aadd(aCabec,{"F1_FORMUL" ,"N"                   ,Nil})
+            aadd(aCabec,{"F1_DOC"    ,cNumCte               ,Nil})
+            aadd(aCabec,{"F1_SERIE"  ,cSerie                ,Nil})
+            aadd(aCabec,{"F1_EMISSAO",dEMisCte              ,Nil})
+            aadd(aCabec,{"F1_FORNECE",cCodFor               ,Nil})
+            aadd(aCabec,{"F1_LOJA"   ,cLojFor               ,Nil})
+            aadd(aCabec,{"F1_ESPECIE","CTE"                 ,Nil})
+            aadd(aCabec,{"F1_COND"   ,cCodPgto              ,Nil})
+            aadd(aCabec,{"F1_CHVNFE" ,cCHVNFE               ,Nil})
+            aadd(aCabec,{"F1_UFORITR",cUFOriTR              ,Nil})
+            aadd(aCabec,{"F1_MUORITR",cMUOriTR              ,Nil})
+            aadd(aCabec,{"F1_UFDESTR",cUFDesTR              ,Nil})
+            aadd(aCabec,{"F1_MUDESTR",cMUDesTR              ,Nil})
+            aadd(aCabec,{"F1_ZZIDLIN",cValToChar(cIdCte)    ,Nil})
+            aadd(aCabec,{"F1_TPCTE"  ,cTpCTE                ,Nil})
+            aadd(aCabec,{"F1_MODAL"  ,cModal                ,Nil})
+
+            For nY := 1 to len(aRateio)
+
+                aItens := {{"D1_ITEM"    ,STRZERO(nY,TAMSX3("D1_ITEM")[1])  ,NIL},;
+                            {"D1_COD"    ,aRateio[nY][05]	                ,NIL},;
+                            {"D1_QUANT"  ,aRateio[nY][02]                   ,NIL},;
+                            {"D1_VUNIT"  ,1             	                ,NIL},;
+                            {"D1_TOTAL"  ,aRateio[nY][02]                   ,NIL},;
+                            {"D1_TES"    ,aRateio[nY][07]                   ,NIL},;
+                            {"D1_CF"     ,aRateio[nY][08]                   ,NIL},;
+                            {"D1_BASEICM",aRateio[nY][02]	                ,NIL},;
+                            {"D1_PICM"   ,nAliqICms	                        ,NIL},;
+                            {"D1_CC"     ,aRateio[nY][01]	                ,NIL},;
+                            {"D1_PEDIDO" ,aRateio[nY][03]	                ,NIL},;
+                            {"D1_ITEMPC" ,aRateio[nY][04]	                ,NIL}}
+
+                AAdd( aTotItens, aItens )
+
+            Next nY
+
+            lMSHelpAuto     := .T. //.F. // para nao mostrar os erro na tela
+            lMSErroAuto     := .F. //.F. // inicializa como falso, se voltar verdadeiro e' que deu erro
+            lAutoErrNoFile 	:= .T.
+
+            cCodZZL  := GetSxeNum("ZZL","ZZL_CODIGO")
+            geraLog("Código ZZL: "+cCodZZL)
+            ::aRet[nR][CTE_CODIGOZZL] := cCodZZL
+            ConfirmSx8()
+
+            geraLog("Adicionando dados a tabela ZZL")
+            U_LinAddZZL(cCodZZL,::aRet[nR,11],"C",cIdCte,aCabec,aTotItens)
+
+            if !Empty(aCabec) .and. !Empty(aTotItens) .and. lContinua
+
+                geraLog("Executando MATA103")
+                lMsErroAuto := .F.
+                MSExecAuto( {|x,y,z,w|MATA103( x, y, z, w ) }, aCabec, aTotItens,3, .F. )
+
+                If lMsErroAuto
+                    aRetLog	:= GetAutoGrLog()
+                    cRet    := "Geração CTE "
+                    If Len(aRetLog) > 0 
+                        For nC := 1 To Len(aRetLog)
+                            cTexto := AllTrim(aRetLog[nC])
+                            cTexto := Replace(cTexto, chr(13)+chr(10), ' | ')
+                            cTexto := Replace(cTexto, chr(10)+chr(13), ' | ')
+                            cRet += cTexto
+                        Next nC	
+                    EndIf	
+                    ::aRet[nR,CTE_STATUSINT] := 2
+                    ::aRet[nR,11] := cRet
+                    geraLog("Erro no ExecAuto: "+cRet)
+                    U_LinAtuStatus(cCodZZL,"Erro",cRet)
+                Else
+                    geraLog("Mudando CFOP após integração")
+                    //Muda o CFOP via reclock pois passando a informação no array do execauto, ele muda conforme o CFOP da TES, então faço a mudança na D1, F3 e FT após execução da mesma
+                    MudaCFOP(aCabec,aTotItens)
+
+                    geraLog("CTE Gerado com sucesso!")
+                    
+                    //Verifica se a nota foi gerada no sistema
+                    SF1->(dbSetOrder(1))
+                    If SF1->(DbSeek(FWxFilial("SF1")+cNumCte+Padr(cSerie,3)+cCodFor+cLojFor))
+                        ::aRet[nR,CTE_STATUSINT] := 0
+                        ::aRet[nR,CTE_MSGERRO]   := "CTE "+cNumCte+" foi integrado no sistema "
+                        ::aRet[nR,CTE_CHAVEMONT] := SF1->F1_FILIAL+SF1->F1_DOC+SF1->F1_SERIE+SF1->F1_FORNECE+SF1->F1_LOJA
+                    Else
+                        ::aRet[nR,CTE_STATUSINT] := 2
+                        ::aRet[nR,CTE_MSGERRO] := "CTE "+cNumCte+" não foi integrado no sistema. |"
+                    EndIf
+                    geraLog("Atualizando status na ZZL")
+                    U_LinAtuStatus(cCodZZL,"Integrado")
+                EndIf
+            else
+                if lContinua
+                    ::aRet[nR,CTE_STATUSINT] := 2
+                    ::aRet[nR,CTE_MSGERRO] := "CTE "+cNumCte+" não foi integrado no sistema. | Não foi encontrado os itens para gravar dados. |"
+                    geraLog(::aRet[nR,CTE_MSGERRO])
+                Endif
+            endif
+
+            //Se o CTE já estiver integrado, conforme e-mail e solicitação da Nayale, o mesmo não vai ser mais dado erro como "Já integrado", será enviado como OK na integração
+            //Régis Ferreira 03/06/2024
+            geraLog("Verificando se o CTE já está integrado")
+            if ::aRet[nR,CTE_STATUSINT] == 2 .and. lJaIntegr
+                cRet := "CTE com erro (já integrado), porém será atualizado o status para 'sem erro' e essa mensagem é só para manter histórico."
+                geraLog(cRet)
+                ::aRet[nR,CTE_STATUSINT] := 0
+                ::aRet[nR,CTE_MSGERRO]   := ""
+                //Atualiza o Status com mensagem de erro para ter histórico que foi feito isso
+                U_LinAtuStatus(cCodZZL,"Erro",cRet)
+                //Grava como atualizado
+                U_LinAtuStatus(cCodZZL,"Integrado")
+            endif
+
+            geraLog("Retornando dados do CTE para a Lincros")
+            FreeObj(oRetInt)
+            oRetInt  := Lincros():New()
+            oRetInt:AtuStatusCtes(::aRet[nR])
+
+        Next nX
+    
+    End Transaction
+
+Return(.T.)
+
+
+/*
+    Atualiza os dados da integração no Lincros.
+*/
+Method AtuStatusCtes(aRetFil) CLASS Lincros
+
+    Local lRet		:= .F.
+    Local ojCTE		:= Nil
+    Local aCTE		:= {}
+    Local nX        := 0
+    Local ojRequest := Nil
+    Local aRetCTE   := {}
+
+    /*
+    {
+    "numero": 0,
+    "serie": "string",
+    "cnpjEmissor": "string",
+    "statusIntegracao": 0,
+    "codigoMensagem": "string",
+    "mensagem": "string"
+    }
+
+    0 - Integrado
+    1 - Não integrado
+    2 - Erro integração
+    3 - Aguardando integração
+    4 - Enviar publicação
+    5 - Estorno ERP
+    */
+
+
+    ojCTE := JsonObject():New()
+    ojCTE['numero']		        := aRetFil[4]		
+    ojCTE['serie']			    := aRetFil[5]	
+    ojCTE['cnpjEmissor']	    := aRetFil[6]  	
+    ojCTE['codigoMensagem']		:= ""		
+    ojCTE['statusIntegracao']	:= aRetFil[10]  
+    ojCTE['mensagem']			:= aRetFil[11]     
+    AAdd(aCTE,ojCTE)
+    if !Empty(aRetFil[13])
+        DeletaErros(aRetFil[13],aRetFil[14])
+    endif
+
+    If Len(aCTE) > 0
+        ojRequest 	:= JsonObject():New()
+        ojRequest['ctes'] := aCTE
+
+        lRet := ::ProcRequest("/api/cte/salvarRetornoCteMultiplo", "POST", ojRequest:toJson() )
+
+        If !lRet
+			cLogErro := OEMToANSI(FWTimeStamp(2)+ "  ERRO NA API /cte/salvarRetornoCteMultiplo  ERRO : "+::cMensagemErro+" "+::cStatusCode+"" )
+            geraLog("Erro: "+cLogErro)
+        Else
+            aRetCTE := ::ojRetorno['retornos']
+            if !Empty(aRetCTE)
+                For nX:=1 to Len(aRetCTE)
+                    If aRetCTE[nX]['status'] == "ERRO"
+                        cLogErro := OEMToANSI(FWTimeStamp(2)+ "  ERRO NA ATUALIZAÇÃO DO STATUS Ref: a CTE "+aRetCTE[nX]['numero']+" ERRO : "+aRetCTE[nX]['mensagem']+"" )
+                        geraLog("Erro: "+cLogErro)
+                        lRet := .f.
+                    else
+                        geraLog("CTE integrado com a Lincros")
+                    EndIf
+                Next nX
+            endif
+        EndIf
+
+    EndIf
+
+Return(lRet)
+
+/*
+    Query de bysca de dados da SC7
+*/
+Method CriaQueryPC() CLASS Lincros
+
+    Local cQuery := ""
+    Local oQuery := FWPreparedStatement():New()
+
+    geraLog("Query para buscar o pedido de venda")
+
+    cQuery += " SELECT C7_NUM, C7_ITEM , C7_PRODUTO, C7_ZZTIPO, C7_COND " + CRLF
+    cQuery += " FROM "+RetSqlName("SC7")+" " + CRLF
+    cQuery += " WHERE C7_FILIAL = ? " + CRLF
+    cQuery += "  AND C7_FORNECE = ? " + CRLF
+    cQuery += "  AND C7_LOJA = ? " + CRLF
+    cQuery += "  AND C7_CC = ? " + CRLF
+    cQuery += "  AND (C7_QUANT - C7_QUJE) >= ? " + CRLF
+    cQuery += "  AND C7_RESIDUO = '' " + CRLF
+    cQuery += "  AND C7_CONAPRO = 'L' " + CRLF
+    cQuery += "  AND C7_ZZTIPO IN ('SL','SG') " + CRLF
+    cQuery += "  AND D_E_L_E_T_ = '' " + CRLF
+    cQuery += " ORDER BY 1,2 " + CRLF
+
+    oQuery:SetQuery(cQuery)
+
+Return(oQuery)
+
+
+Static Function CTEUF(cEstCTE)
+
+	Local aUF := {}
+    Local cUF := ""
+
+    aadd(aUF,{"RO","11"})
+    aadd(aUF,{"AC","12"})
+    aadd(aUF,{"AM","13"})
+    aadd(aUF,{"RR","14"})
+    aadd(aUF,{"PA","15"})
+    aadd(aUF,{"AP","16"})
+    aadd(aUF,{"TO","17"})
+    aadd(aUF,{"MA","21"})
+    aadd(aUF,{"PI","22"})
+    aadd(aUF,{"CE","23"})
+    aadd(aUF,{"RN","24"})
+    aadd(aUF,{"PB","25"})
+    aadd(aUF,{"PE","26"})
+    aadd(aUF,{"AL","27"})
+    aadd(aUF,{"MG","31"})
+    aadd(aUF,{"ES","32"})
+    aadd(aUF,{"RJ","33"})
+    aadd(aUF,{"SP","35"})
+    aadd(aUF,{"PR","41"})
+    aadd(aUF,{"SC","42"})
+    aadd(aUF,{"RS","43"})
+    aadd(aUF,{"MS","50"})
+    aadd(aUF,{"MT","51"})
+    aadd(aUF,{"GO","52"})
+    aadd(aUF,{"DF","53"})
+    aadd(aUF,{"SE","28"})
+    aadd(aUF,{"BA","29"})
+    aadd(aUF,{"EX","99"})
+
+	cUF := aUF[aScan(aUF,{|x| x[2] == cEstCTE})][01]
+
+Return cUF
+
+/*
+    Busca Faturas Para integração
+*/
+Method GetFaturas() CLASS Lincros
+
+    Local lRet		:= .F.
+    Local cPath     := "/api/fatura/buscarRegistrosParaIntegracao/999"
+
+    lRet := ::ProcRequest(cPath, "GET", "", .T. )
+
+Return(lRet)
+
+/*
+    Busca ID de Faturas Para integração
+*/
+Method FaturasIds() CLASS Lincros
+
+    Local lRet		:= .T.
+    Local oFaturas  := ::ojRetorno
+    Local nLenFat   := 0
+
+    ::aFATs := oFaturas['faturas']
+    nLenFat	:= Len(::aFATs)
+    If nLenFat == 0
+        ::cMensagemErro := 'Não existem Faturas para serem Integradas.'
+        Return .F.
+    EndIf
+
+Return(lRet)
+
+Method GetArrayFaturas() CLASS Lincros
+Return(::aFATs)
+
+Method PostDadosFaturas(idFatura) CLASS Lincros
+
+    Local lRet		:= .F.
+    Local cPath     := "/api/fatura/recuperarDados"
+    Local ojRequest := JsonObject():New()
+
+    ojRequest['fatura'] := idFatura
+        
+    lRet := ::ProcRequest(cPath, "POST", ojRequest:toJson() )
+
+Return(lRet)
+
+/*
+    Rotina que irá gravar os dados das faturas na integração
+*/
+Method GrvFatura(cIdFatura) CLASS Lincros
+
+    Local oRetInt       := Nil
+    Local nR            := 0
+    Local cCodFor       := ""
+    Local cLojFor       := ""
+    Local aCabec        := {}
+    Local aRetLog	    := {}
+    Local cRet          := ""
+    Local nC            := 0
+    Local cTexto        := ""
+
+    Local cPrefixo      := ""
+    Local cTipoFat      := ""
+    Local nValorFAT     := 0
+
+    Local aRateio       := {}
+
+    Local lContinua     := .T.
+    Local cRetNota      := ""
+    Local cErro         := ""
+    Local cNatur        := GetMv("ZZ_LINCR08")
+    Local dEMissao      := cTod("")
+    Local dVencimento   := cTod("")
+    Local aNotaCTE      := {}
+    Local aFatPedidos   := {}
+    Local cErrCC        := ""
+    Local aTitBaixar    := {}
+    Local aGeraFatura   := {}
+
+    Private oFatura     := ::ojRetorno
+    Private aFatura     := {}
+    Private aCCFatura   := {}
+
+    Private cCodZZL     := ""
+
+    Public  aRatLincros :={}
+
+    geraLog(Replicate("*",20))
+	geraLog("Iniciando integração de Faturas")
+	geraLog(Replicate("*",20))
+
+    Begin Transaction
+
+        Pergunte("AFI290",.F.)
+        geraLog("Configurando Perguntas da rotina FINA290")
+
+        MV_PAR02    :=  2 //Não mostra contabilização na tela
+        MV_PAR03    :=  1 //Contabiliza online
+        MV_PAR04    :=  1 //Contabiliza online
+
+        If oFatura:GetJsonObject("status") <> nil
+            ::cMensagemErro := oFatura:GetJsonObject("mensagem")
+            Return .F.
+        EndIf
+
+        If oFatura:GetJsonObject("fatura") == nil
+            ::cMensagemErro := 'Não existem Dados para essa Fatura para ser Integrados. |'
+            Return .F.
+        EndIf
+
+        aFatura     := oFatura['fatura']
+        if aFatura['numero'] == Nil 
+            ::cMensagemErro := 'Não existem Dados para essa Fatura para serer Integrados. |'
+            Return .F.
+        EndIf
+
+        cCodZZL  := GetSxeNum("ZZL","ZZL_CODIGO")
+        ConfirmSx8()
+
+        AAdd(::aRetFat, {;
+                        "0000"                              ,;  // 1 - Filial
+                        ""                                  ,;  // 2 - nome filial
+                        cIdFatura                           ,;  // 3 - ID Fatura
+                        aFatura['numero']		            ,;	// 4 - NUMERO do Título
+                        aFatura['serie']	                ,;	// 5 - Prefixo
+                        aFatura['cnpjEmissor']	            ,;	// 6 - CNPJ FORNEC
+                        ""                                  ,;  // 7 - NOME FORNECE
+                        CTOD("")                            ,;  // 8 - EMISSAO FATURA
+                        0                                   ,;  // 9 - VALOR FATURA
+                        0                                   ,;  // 10 - Cod Status 0-Integrado 2-Erro
+                        ""					                ,;	// 11 - Msg Erro
+                        ""                                  ,;  // 12 - Status
+                        ""                                  ,;  // 13 - Chave (Filial+Doc+Serie+Fornecedor+Loja) Para limpar o monitor caso a integração aconteceça normalmente.
+                        ""                                  ,;  // 14 - CODIGO ZZL
+                        } )
+        
+        nR := Len(::aRetFat)
+
+        geraLog("Validando FILIAL")
+        If !ChkFilial(aFatura['empresa'])
+            ::aRetFat[nR][FAT_STATUSINT] := 2
+            ::aRetFat[nR][FAT_MSGERRO] := "Cnpj da Unidade "+aFatura['empresa'] + " não cadastrada para Integração. |"
+            cErro += ::aRetFat[nR][FAT_MSGERRO] + CRLF
+            lContinua := .F.
+            geraLog("Erro "+cErro)
+        Else
+            ::aRetFat[nR][FAT_FILIAL] := cFilAnt
+            ::aRetFat[nR][FAT_NOMEFIL] := FwFilialName( ,cFilAnt, 1 )
+        EndIf
+
+        //Consulta fornecedor
+        geraLog("Validando FORNECEDOR")
+        if lContinua
+            If Empty(aFatura['cnpjEmissor'])
+                ::aRetFat[nR][FAT_STATUSINT] := 2
+                ::aRetFat[nR][FAT_MSGERRO] := "Cnpj do Fornecedor não informado. |"
+                cErro += ::aRetFat[nR][FAT_MSGERRO] + CRLF
+                lContinua := .F.
+                geraLog("Erro "+cErro)
+            Else
+                SA2->(DbSetOrder(3)) //A2_FILIAL+A2_CGC
+                If !SA2->(DbSeek(FWxFilial("SA2")+aFatura['cnpjEmissor']) )
+                    ::aRetFat[nR][FAT_STATUSINT] := 2
+                    ::aRetFat[nR][FAT_MSGERRO] := "Fornecedor não encontrado com o CNPJ "+aFatura['cnpjEmissor']+". |"
+                    cErro += ::aRetFat[nR][FAT_MSGERRO] + CRLF
+                    lContinua := .F.
+                    geraLog("Erro "+cErro)
+                Else
+                    cCodFor := SA2->A2_COD
+                    cLojFor := SA2->A2_LOJA
+                    ::aRetFat[nR][07] := AllTrim(SA2->A2_NOME)
+                    geraLog("Fornecedor "+cCodFor+"/"+cLojFor+" - "+SA2->A2_NOME)
+                    /*geraLog("Validando condição de Pagamento no fornecedor")
+                    if !Empty(SA2->A2_COND)
+                        cCodFor := SA2->A2_COD
+                        cLojFor := SA2->A2_LOJA
+                        ::aRetFat[nR][07] := AllTrim(SA2->A2_NOME)
+                        geraLog("Fornecedor "+cCodFor+"/"+cLojFor+" - "+SA2->A2_NOME)
+                    else
+                        ::aRetFat[nR][FAT_STATUSINT] := 2
+                        ::aRetFat[nR][FAT_MSGERRO] := "Fornecedor "+SA2->A2_COD+"/"+SA2->A2_LOJA+" não te condição de pagamento cadastrada. |"
+                        cErro += ::aRetFat[nR][FAT_MSGERRO] + CRLF
+                        lContinua := .F.
+                        geraLog("Erro :"+cErro)
+                    endif*/
+                EndIf
+            EndIf
+        Endif
+
+        cNumFatura  := strzero(aFatura['numero'],9)
+        dVencimento := StoD(StrTran(SubStr(aFatura['dataVencimento'],1,10),"-",""))
+        dEMissao    := StoD(StrTran(SubStr(aFatura['dataEmissao'],1,10),"-",""))
+        cPrefixo    := "CTE"
+        cTipoFat    := "FT"
+        nValorFAT   := Round( aFatura['valor'],TamSX3("E2_VALOR")[2]) 
+        ::aRetFat[nR][09] := nValorFAT
+
+        geraLog("Número da Fatura: "+cNumFatura)
+        geraLog("Valor da Fatura: "+cValtoChar(nValorFAT))
+
+        //Validando se a fatura tem valor, alguns exemplos vieram com valor zerado.
+        if nValorFAT <= 0
+            lContinua := .F.
+            ::aRetFat[nR][FAT_STATUSINT] := 2
+            ::aRetFat[nR][FAT_MSGERRO] := "Fatura com valor zero, impossível criar fatura |"
+            geraLog("Erro "+::aRetFat[nR][FAT_MSGERRO])
+        endif
+
+        //Busca dados dos CTE's vinculados a essa fatura
+        GeraLog("Validando CTE vinculados a Fatura")
+        if lContinua
+            aCCFatura := aFatura['ctes']
+            if Empty(aCCFatura)
+                lContinua := .F.
+                ::aRetFat[nR][FAT_STATUSINT] := 2
+                ::aRetFat[nR][FAT_MSGERRO] := "Não há dados de fatura nessa integração |"
+                geraLog("Erro "+::aRetFat[nR][FAT_MSGERRO])
+            else
+                aNotaCTE := GetCTEdaFatura(aCCFatura)
+                if Empty(aNotaCTE)
+                    ::aRetFat[nR][FAT_STATUSINT] := 2
+                    ::aRetFat[nR][FAT_MSGERRO] += "Fatura sem CTEs para vincular a fatura. |"
+                    lContinua := .F.
+                    geraLog("Erro "+::aRetFat[nR][FAT_MSGERRO])
+                else
+                    GeraLog("Alterando dados nos CTE's")
+                    cRetNota := ValidaSF1CTE(aNotaCTE,cCodZZL,@aFatPedidos)
+                    if !Empty(cRetNota)
+                        ::aRetFat[nR][FAT_STATUSINT] := 2
+                        ::aRetFat[nR][FAT_MSGERRO] += cRetNota
+                        lContinua := .F.
+                        geraLog("Erro "+::aRetFat[nR][FAT_MSGERRO])
+                    else
+                        if Empty(aFatPedidos)
+                            ::aRetFat[nR][FAT_STATUSINT] := 2
+                            ::aRetFat[nR][FAT_MSGERRO] += cRetNota
+                            lContinua := .F.
+                            geraLog("Erro "+::aRetFat[nR][FAT_MSGERRO])
+                        endif
+                    Endif
+                endif
+            endif
+        endif
+
+        geraLog("Monta Dados da Fatura para baixar.")
+        //Nesse momento será montado um array com os dados das faturas geradas pelo lançamento do CTE
+        //Esse array é usado na rotina FINA290 que baixa essas faturas e gera uma nova com os valores aglutinados
+        if lContinua
+            lContinua := MontaTitBaixar(aNotaCTE,@aTitBaixar)
+            if !lContinua 
+                ::aRetFat[nR][FAT_STATUSINT]    := 2
+                ::aRetFat[nR][FAT_MSGERRO]      += "Erro ao montar o título para baixar e gerar fatura unificada de todos os CTE's"
+            endif
+        endif
+
+        If !Empty(cErrCC)
+            ::aRetFat[nR][FAT_STATUSINT] := 2
+            ::aRetFat[nR][FAT_MSGERRO] += cErrCC
+            geraLog("Erro "+::aRetFat[nR][FAT_MSGERRO])
+            lContinua := .F.
+        EndIf
+
+        //Verifica se a nota já existe no sistema
+        geraLog("Validando se a fatura já está lançada no Financeiro")
+        if lContinua
+            SE2->(dbSetOrder(6))
+            If SE2->(DbSeek(FWxFilial("SE2")+cCodFor+cLojFor+Padr(cPrefixo,3)+cNumFatura))
+                ::aRetFat[nR][FAT_STATUSINT] := 2
+                ::aRetFat[nR][FAT_MSGERRO] += "Fatura "+cNumFatura+" já foi integrada no sistema. |"
+                geraLog("Erro: "+::aRetFat[nR][FAT_MSGERRO])
+                lContinua := .F.
+            EndIf
+        endif
+
+        //Array da nota fatura, será gerado essa fatura e baixado as faturas que estão no array aTitbaixar
+        aGeraFatura := {;
+            cPrefixo,;                              //Prefixo
+            cTipoFat,;                              //Tipo da Fatura
+            cNumFatura,;                            //Número da Fatura
+            padr(cNatur,tamsx3("E1_NATUREZ")[1]),;  //Natureza
+            CtoD("30/10/2000"),;                    //Data De
+            CtoD("30/10/2049"),;                    //Data Ate
+            cCodFor,;                               //Fornecedor
+            cLojFor,;                               //Loja
+            "",;                                    //Fornecedor da Geração
+            "",;                                    //Loja do Fornecedor de geração
+            "001",;                                 //Condição de Pagamento
+            01,;                                    //Moeda do Título
+            aTitbaixar,;                            //Array com os títulos a baixar
+            0,;                                     //Valor de decrescimo
+            0,;                                     //Valor de Acrescimo
+            dEMissao}                               //Data de Emissão da Fatura para calculo do vencimento
+
+        geraLog("Montando Array do ExecAuto")
+        //Esse array era o antigo, mative o mesmo somente para atualização da tabela ZZL, não fiz diferente devido ao tempo necessário para desenvolvimento
+        aadd(aCabec,{"E2_PREFIXO"       ,cPrefixo                                           ,Nil})
+        aadd(aCabec,{"E2_NUM"           ,cNumFatura                                         ,Nil})
+        aadd(aCabec,{"E2_PARCELA"       ,Padr(" ",TamSx3("E2_PARCELA")[1])                  ,Nil})
+        aadd(aCabec,{"E2_TIPO"          ,cTipoFat                                           ,Nil})
+        aadd(aCabec,{"E2_NATUREZ"       ,padr(cNatur,tamsx3("EV_NATUREZ")[1])               ,Nil})
+        aadd(aCabec,{"E2_FORNECE"       ,cCodFor                                            ,Nil})
+        aadd(aCabec,{"E2_LOJA"          ,cLojFor                                            ,Nil})
+        aadd(aCabec,{"E2_EMISSAO"       ,dEMissao                                           ,Nil})
+        aadd(aCabec,{"E2_VENCTO"        ,dVencimento                                        ,Nil})
+        aadd(aCabec,{"E2_VALOR"         ,nValorFAT                                          ,Nil})
+        aadd(aCabec,{"E2_HIST"          ,'FATURA CORRESPONDENTE A INTEGRACAO CTE'           ,Nil})
+        aadd(aCabec,{"E2_ZZCOZZL"       ,cCodZZL                                            ,Nil})
+        
+        lMSHelpAuto     := .T. //.F. // para nao mostrar os erro na tela
+        lMSErroAuto     := .F. //.F. // inicializa como falso, se voltar verdadeiro e' que deu erro
+        lAutoErrNoFile 	:= .T.
+
+        geraLog("Código ZZL "+cCodZZL)
+        ::aRetFat[nR][FAT_CODIGOZZL] := cCodZZL
+        geraLog("Adicionando dados na tabela ZZL")
+        U_LinAddZZL(cCodZZL,::aRetFat[nR][FAT_MSGERRO],"F"/*Fatura*/,cIdFatura,aCabec,aRateio)
+
+        if !Empty(aGeraFatura) .and. lContinua
+
+            lMsErroAuto := .F.
+            
+            //Execauto que baixa as faturas do CTE e gera um novo já aglutinados
+            GeraLog("Executando Rotina Automática FINA290")
+            MsExecAuto( { |x,y| FINA290(x,y)}, 3, aGeraFatura )
+
+            If lMsErroAuto
+                aRetLog	:= GetAutoGrLog()
+                cRet    := "Geração Fatura "
+                If Len(aRetLog) > 0 
+                    For nC := 1 To Len(aRetLog)
+                        cTexto := AllTrim(aRetLog[nC])
+                        cTexto := Replace(cTexto, chr(13)+chr(10), ' | ')
+                        cTexto := Replace(cTexto, chr(10)+chr(13), ' | ')
+                        cRet += cTexto
+                    Next nC	
+                EndIf	
+                ::aRetFat[nR][FAT_STATUSINT] := 2
+                ::aRetFat[nR][FAT_MSGERRO] := cRet
+                geraLog("Erro Rotina automática: "+cRet)
+
+                U_LinAtuStatus(cCodZZL,"Erro",cRet)
+            Else
+                geraLog("Fatura Integrada com sucesso...")
+                //Verifica se a nota foi gerada no sistema
+                SE2->(dbSetOrder(6))
+                If SE2->(DbSeek(FWxFilial("SE2")+cCodFor+cLojFor+Padr(cPrefixo,3)+cNumFatura))
+                    ::aRetFat[nR][FAT_STATUSINT] := 0
+                    ::aRetFat[nR][FAT_MSGERRO]   := "Fatura "+cNumFatura+" foi integrado no sistema "
+                    ::aRetFat[nR][FAT_CHAVEMONT] := SE2->E2_FILIAL+SE2->E2_NUM+SE2->E2_PREFIXO+SE2->E2_FORNECE+SE2->E2_LOJA
+                Else
+                    ::aRetFat[nR][FAT_STATUSINT] := 2
+                    ::aRetFat[nR][FAT_MSGERRO] := "Fatura "+cNumFatura+" não foi integrado no sistema. |"
+                    geraLog(::aRetFat[nR][FAT_MSGERRO])
+                EndIf
+                //como cada fatura pode vir com um vencimento diferente, é chamado o execauto abaixo para que altere a data da integração para a data correta
+                geraLog("Atualizando a data de vencimento da nota fatura")
+                AtuVenc(aGeraFatura,dVencimento,cCodZZL)
+                geraLog("Atualizando dados da integração na ZZL")
+                U_LinAtuStatus(cCodZZL,"Integrado")
+            EndIf
+        else
+            if lContinua
+                ::aRetFat[nR][FAT_STATUSINT] := 2
+                ::aRetFat[nR][FAT_MSGERRO] := "Fatura "+cNumFatura+" não foi integrado no sistema. | Não foi encontrado os itens para gravar dados. |"
+                geraLog(::aRetFat[nR][FAT_MSGERRO])
+            endif
+        endif
+
+        geraLog("Devolvendo dados ao Lincros")
+        FreeObj(oRetInt)
+        oRetInt  := Lincros():New()
+        oRetInt:AtuStatusFatura(::aRetFat[nR])
+    
+    End Transaction
+
+Return(.T.)
+
+/*
+    Rotina que deleta os registros da mesma integração e que está com erro.
+*/
+Static Function DeletaErros(cChave,cCodZZL)
+
+    Local aArea     := GetArea()
+    Local aAreaZZL  := ZZL->(GetArea())
+    Local cErroAtu  := ""
+
+    geraLog("Deletando registros que estão com erro...")
+
+    ZZL->(DbSetOrder(2))
+    if ZZL->(DbSeek(cChave))
+
+        While ZZL->ZZL_FILIAL+ZZL->ZZL_DOC+ZZL->ZZL_SERIE+ZZL->ZZL_FORNEC+ZZL->ZZL_LOJA == cChave
+            if ZZL->ZZL_STATUS == "X"
+                geraLog("Código ZZL: "+ZZL->ZZL_CODIGO)
+                cErroAtu        := ZZL->ZZL_ERRO
+                cErroAtu		+= CRLF + CRLF
+                cErroAtu		+= Replicate("*",15) + CRLF
+                cErroAtu		+= "Deletado em "
+                cErroAtu		+= DTOC(Date()) + " - "
+                cErroAtu		+= Time() + " pois foi reprocessado."
+                cErroAtu		+= CRLF
+                cErroAtu        += "Registro Deletado pelo usuario "+Alltrim(UsrRetName(RetCodUsr()))
+                cErroAtu		+= CRLF
+                cErroAtu		+= Replicate("*",15)
+
+                IF ZZL->(RecLock("ZZL", .F.))
+                    ZZL->ZZL_ERRO := cErroAtu
+                    ZZL->(DbDelete())
+                    ZZL->(MsUnlock())
+                endif
+            endif
+            ZZL->(DbSkip())
+        enddo
+    Endif
+
+    //Após deletar os registros, muda a tabela ZZL para integrado
+    ZZL->(DbSetOrder(1))
+    if ZZL->(DbSeek(xFilial("ZZL")+cCodZZL))
+        geraLog("Atualizando registro "+ZZL->ZZL_CODIGO+" para integrado")
+        IF ZZL->(RecLock("ZZL", .F.))
+            ZZL->ZZL_STATUS:= "3"
+            ZZL->(MsUnlock())
+        endif
+    endif
+
+    ZZL->(RestArea(aAreaZZL))
+    RestArea(aArea)
+
+Return Nil
+
+/*
+    Rotina que gera o Rateio para o lançamento dos CTE's
+*/
+Static Function GeraRateio(nY,aCCustos,aRateio,nValFatCC,nPerc)
+
+    Local nValAux   := 0
+    Local nX        := 0
+
+    if nY == Len(aCCustos)
+        nValAux := 0
+        for nX := 1 to len(aRateio)
+            nValAux += aRateio[nX][2]
+        Next nX
+        aadd(aRateio,{cCCusto,nValFatCC-nValAux})
+    else
+        nValAux := Round(nValFatCC*(nPerc/100),2)
+        nValFatCC := nValFatCC - nValAux
+        aadd(aRateio,{cCCusto,nValAux})
+    endif
+
+Return
+
+/*
+    Rotina que atualiza os dados de fatura no LIncros
+*/
+Method AtuStatusFatura(aRetFil) CLASS Lincros
+
+    Local lRet		:= .F.
+    Local ojCTE		:= Nil
+    Local aCTE		:= {}
+    Local ojRequest := Nil
+
+    /*
+    {
+    "codigoMensagem": "string",
+    "statusIntegracao": 0,
+    "serieFatura": "str",
+    "cnpjEmissor": "string",
+    "mensagem": "string",
+    "numeroFatura": 0
+    }
+
+    0 - Integrado
+    1 - Não integrado
+    2 - Erro integração
+    3 - Aguardando integração
+    4 - Enviar publicação
+    5 - Estorno ERP
+    */
+
+    ojCTE := JsonObject():New()
+    ojCTE['codigoMensagem']		:= ""
+    ojCTE['statusIntegracao']	:= aRetFil[10]
+    ojCTE['serie']			    := aRetFil[5]
+    ojCTE['numeroFatura']	    := aRetFil[4]
+    ojCTE['cnpjEmissor']	    := aRetFil[6]
+    ojCTE['mensagem']			:= aRetFil[11]
+    AAdd(aCTE,ojCTE)
+    if !Empty(aRetFil[13])
+        DeletaErros(aRetFil[13],aRetFil[14])
+    endif
+
+    If Len(aCTE) > 0
+        ojRequest 	:= JsonObject():New()
+        ojRequest := ojCTE
+
+        lRet := ::ProcRequest("/api/fatura/salvarRetornoFatura", "POST", ojRequest:toJson() )
+
+        If !lRet
+			cLogErro := OEMToANSI(FWTimeStamp(2)+ "  ERRO NA API /cte/salvarRetornoCteMultiplo  ERRO : "+::cMensagemErro+" "+::cStatusCode+"" )
+            geraLog("Erro: "+cLogErro)
+        Else
+            If ::ojRetorno['status'] == "ERRO"
+                cLogErro := OEMToANSI(FWTimeStamp(2)+ "  ERRO NA ATUALIZAÇÃO DO STATUS Ref: a CTE "+aRetCTE[nX]['numero']+" ERRO : "+aRetCTE[nX]['mensagem']+"" )
+                geraLog("Erro: "+cLogErro)
+                lRet := .f.
+            else
+                geraLog("Integração devolvida ao Lincros")
+            EndIf
+        EndIf
+
+    EndIf
+
+Return(lRet)
+
+/*
+    Monta um array com informações dos CTES que estão vinculados a uma fatura
+*/
+Static Function GetCTEdaFatura(aCCFatura)
+
+    Local aRet      := {}
+    Local oRetNFCTE := NIL
+    Local nRetNFCTE := 0
+    Local nQtdCte   := 0
+
+    for nRetNFCTE := 1 to len(aCCFatura)
+
+        nQtdCte   := Len(aCCFatura[nRetNFCTE]['nfes'])
+
+        oRetNFCTE := aCCFatura[nRetNFCTE]
+        aadd(aRet,;
+            xFilial("SF1")+;
+            StrZero(oRetNFCTE['numero'],9)+;
+            iif(isDigit(oRetNFCTE['serie']),Padr(StrZero(Val(oRetNFCTE['serie']),3),TamSx3("F1_SERIE")[1]),Padr(oRetNFCTE['serie'],TamSx3("F1_SERIE")[1]))+;
+            Posicione("SA2",3,xFilial("SA2")+oRetNFCTE['cnpjEmissor'],"A2_COD")+;
+            Posicione("SA2",3,xFilial("SA2")+oRetNFCTE['cnpjEmissor'],"A2_LOJA");
+        )
+
+    Next nRetNFCTE
+
+Return aRet
+
+
+/*
+    Busca os dados do F1 com as informações da Fatura
+*/
+Static Function ValidaSF1CTE(aNotaCTE,cCodZZL,aFatPedidos)
+
+    Local cRet      := ""
+    Local nQtdSF1   := 0
+    Local nPos      := 0
+    Local aArea     := GetArea()
+    Local aAreaSF1  := SF1->(GetArea())
+    Local aAreaSD1  := SD1->(GetArea())
+
+    For nQtdSF1 := 1 to len(aNotaCTE)
+        SF1->(DbSetOrder(1))
+        if !SF1->(DbSeek(aNotaCTE[nQtdSF1]))
+            lRet := .F.
+            cRet += "CTE "+SubStr(aNotaCte[nQtdSF1],5,9)+" da série "+SubStr(aNotaCte[nQtdSF1],12,3)+" não encontrado no lançamento de CTE |"
+        endif
+    Next nQtdSF1
+
+    if Empty(cRet)
+        for nQtdSF1 := 1 to len(aNotaCTE)
+            SD1->(DbSetOrder(1))
+            if SD1->(DbSeek(aNotaCTE[nQtdSF1]))
+                while !SD1->(EOF()) .and. SD1->D1_FILIAL+SD1->D1_DOC+SD1->D1_SERIE+SD1->D1_FORNECE+SD1->D1_LOJA == aNotaCTE[nQtdSF1]
+                    if Empty(aFatPedidos)
+                        aadd(aFatPedidos,{SD1->D1_PEDIDO,GetAdvfval("SC7","C7_ZZCCOUP",xFilial("SC7")+SD1->D1_PEDIDO,1,"")})
+                    else
+                        nPos := aScan(aFatPedidos,{|x| x[1] == SD1->D1_PEDIDO})
+                        if nPos <= 0
+                            aadd(aFatPedidos,{SD1->D1_PEDIDO,GetAdvfval("SC7","C7_ZZCCOUP",xFilial("SC7")+SD1->D1_PEDIDO,1,"")})
+                        endif
+                    endif
+                    SD1->(DbSkip())
+                Enddo
+            endif
+        Next nQtdSF1
+    Endif
+
+    SF1->(RestArea(aAreaSF1))
+    SD1->(RestArea(aAreaSD1))
+    RestArea(aArea)
+
+Return cRet
+
+//-----------------------------------------------------------------
+Static Function geraLog( cMensagem )
+
+    LogMsg('tlogmsg', 22, 5, 1, '', '', "[" + DTOC(Date()) + " " + Time() + "] LINCROS.TLPP - " + cMensagem )
+
+Return
+
+
+/*
+    Monta os dados de Pedido de Compras
+    Não será gravado no momento, caso necessário já está pronto para levar os dados do pedido e  gravar no financeiro.
+*/
+Static Function GetPCCTE(aFatPedidos)
+
+    Local cRet  := ""
+    Local nPC   := 0
+
+    for nPC := 1 to len(aFatPedidos)
+        cRet += "Pedido: "+Alltrim(aFatPedidos[nPC][1])+"/"+Alltrim(aFatPedidos[nPC][2])+ " - "
+    Next nPC
+
+Return cRet
+
+/*
+    Rotina que muda o CFOP das notas de entrada após o execauto
+*/
+Static Function MudaCFOP(aCabec,aTotItens)
+
+    Local aArea     := GetArea()
+    Local aAreaSD1  := SD1->(GetArea())
+    Local aAreaSF3  := SF3->(GetArea())
+    Local aAreaSFT  := SFT->(GetArea())
+    Local nItens    := 0
+    Local nPosItem  := 0
+    Local cDocF1    := padr(aCabec[aScan(aCabec,{|x| x[1] == "F1_DOC"})][2],TamSX3("F1_DOC")[1])
+    Local cSerieF1  := padr(aCabec[aScan(aCabec,{|x| x[1] == "F1_SERIE"})][2],TamSX3("F1_SERIE")[1])
+    Local cFornF1   := padr(aCabec[aScan(aCabec,{|x| x[1] == "F1_FORNECE"})][2],TamSX3("F1_FORNECE")[1])
+    Local cLojaF1   := padr(aCabec[aScan(aCabec,{|x| x[1] == "F1_LOJA"})][2],TamSX3("F1_LOJA")[1])
+    Local cItem     := ""
+    Local cCodPrd   := ""
+    Local nPosCFOP  := 0
+    Local nPosCOD   := 0
+
+    SD1->(DbSetOrder(1))
+    for nItens := 1 to len(aTotItens)
+        nPosItem:= aScan(aTotItens[nItens],{|x| x[1] == "D1_ITEM"})
+        nPosCFOP:= aScan(aTotItens[nItens],{|x| x[1] == "D1_CF"})
+        nPosCOD := aScan(aTotItens[nItens],{|x| x[1] == "D1_COD"})
+        cItem   := padr(aTotItens[nItens][nPosItem][2],TamSX3("D1_ITEM")[1])
+        cCodPrd := padr(aTotItens[nItens][nPosCOD][2],TamSX3("D1_COD")[1])
+        
+        if SD1->(DbSeek(xFilial("SD1")+cDocF1+cSerieF1+cFornF1+cLojaF1+cCodPrd+cItem))
+            if SD1->(RecLock("SD1", .F.))
+                SD1->D1_CF := aTotItens[nItens][nPosCFOP][2]
+                SD1->(MsUnlock())
+            endif
+        endif
+    Next nItens
+
+    SF3->(DbSetOrder(4))
+    if SF3->(DbSeek(xFilial("SF3")+cFornF1+cLojaF1+cDocF1+cSerieF1))
+        While SF3->(F3_FILIAL+F3_CLIEFOR+F3_LOJA+F3_NFISCAL+F3_SERIE) == xFilial("SF3")+cFornF1+cLojaF1+cDocF1+cSerieF1
+            if SF3->(RecLock("SF3", .F.))
+                SF3->F3_CFO := aTotItens[1][nPosCFOP][2]
+                SF3->(MsUnlock())
+            Endif
+            SF3->(DbSkip())
+        enddo
+    Endif
+
+    SFT->(DbSetOrder(1))
+    for nItens := 1 to len(aTotItens)
+        nPosItem:= aScan(aTotItens[nItens],{|x| x[1] == "D1_ITEM"})
+        nPosCFOP:= aScan(aTotItens[nItens],{|x| x[1] == "D1_CF"})
+        nPosCOD := aScan(aTotItens[nItens],{|x| x[1] == "D1_COD"})
+        cItem   := padr(aTotItens[nItens][nPosItem][2],TamSX3("D1_ITEM")[1])
+        cCodPrd := padr(aTotItens[nItens][nPosCOD][2],TamSX3("D1_COD")[1])
+        
+        if SFT->(DbSeek(xFilial("SFT")+"E"+cSerieF1+cDocF1+cFornF1+cLojaF1+cItem+cCodPrd))
+            if SFT->(RecLock("SFT", .F.))
+                SFT->FT_CFOP := aTotItens[nItens][nPosCFOP][2]
+                SFT->(MsUnlock())
+            endif
+        endif
+    Next nItens
+
+    SFT->(RestArea(aAreaSFT))
+    SF3->(RestArea(aAreaSF3))
+    SD1->(RestArea(aAreaSD1))
+    RestArea(aArea)
+
+Return
+
+/*
+    Rotina que monta os títulos que estão vinculados a uma fatura para ser baixado e gerado um novo título
+*/
+Static Function MontaTitBaixar(aNotaCTE,aTitBaixar)
+
+    Local lRet      := .T.
+    Local nTamTit   := TamSx3("E2_NUM")[1]
+    Local nTamParc  := TamSx3("E2_PARCELA")[1]
+    Local nTamForn  := TamSx3("E2_FORNECE")[1]
+    Local nTamLoja  := TamSx3("E2_LOJA")[1]
+    Local nTamTipo  := TamSx3("E2_TIPO")[1]
+    Local nTamFil   := TamSx3("E2_FILIAL")[1]
+    Local nTamPrefix:= TamSx3("E2_PREFIXO")[1]
+    Local aArea     := GetArea()
+    Local aAreaSE2  := SE2->(GetArea())
+    Local nDados    := 0
+
+    for nDados := 1 to len(aNotaCTE)
+        aadd(aTitBaixar,{;
+            Padr(SubStr(aNotaCTE[nDados],14,3),nTamPrefix),;//Prefixo
+            Padr(SubStr(aNotaCTE[nDados],5,9),nTamTit),;    //Numero do Titulo
+            PADR(" ",nTamParc),;                            //Numero da Parcela
+            PADR("NF",nTamTipo),;                           //Tipo 
+            .f.,;                                           //ítulo localizado na geracao de fatura (lógico). Iniciar com falso.
+            PADR(SubStr(aNotaCTE[nDados],17,6),nTamForn),;  //Fornecedor
+            PADR(SubStr(aNotaCTE[nDados],23,2),ntamLoja),;  //Loja
+            PADR(SubStr(aNotaCTE[nDados],1,4),nTamFil)})    //Filial
+    Next nDados
+
+    SE2->(RestArea(aAreaSE2))
+    RestArea(aArea)
+
+Return lRet
+
+/*
+    Rotina que atualiza o vencimento
+*/
+Static Function AtuVenc(aGeraFatura,dVencimento,cCodZZL)
+
+    Local aArea     := GetArea()
+    Local aAreaSE2  := SE2->(GetArea())
+    Local aTitSE2   := {}
+    Local aRetLog   := {}
+    Local cRet      := ""
+    Local nErro     := 0
+    Local cCondicao := Alltrim(SuperGetMV("ZZ_LINCR10",.F.,"090"))
+    Local aVencto   := {}
+
+    aVencto     := Condicao(100,cCondicao,,aGeraFatura[16])
+    //Retirada o cálculo da condição de pagamento abaixo, conversei com o Eliude e é para gravar a data de vencimento que vem na integração
+    //dVencimento := aVencto[1,1]
+
+    SE2->(DbSetOrder(1))
+    //SE2->(E2_FILIAL+E2_PREFIXO+E2_NUM+E2_PARCELA+E2_TIPO+E2_FORNECE+E2_LOJA)
+    if SE2->(DbSeek(xFilial("SE2")+aGeraFatura[1]+aGeraFatura[3]+Padr("01",TamSX3("E2_PARCELA")[1])+Padr(aGeraFatura[2],TamSX3("E2_TIPO")[1])+aGeraFatura[7]+aGeraFatura[8]))
+
+        geraLog("Montando Array do ExecAuto")
+        aadd(aTitSE2,{"E2_PREFIXO"       ,SE2->E2_PREFIXO        ,Nil})
+        aadd(aTitSE2,{"E2_NUM"           ,SE2->E2_NUM            ,Nil})
+        aadd(aTitSE2,{"E2_PARCELA"       ,SE2->E2_PARCELA        ,Nil})
+        aadd(aTitSE2,{"E2_TIPO"          ,SE2->E2_TIPO           ,Nil})
+        aadd(aTitSE2,{"E2_NATUREZ"       ,SE2->E2_NATUREZ        ,Nil})
+        aadd(aTitSE2,{"E2_FORNECE"       ,SE2->E2_FORNECE        ,Nil})
+        aadd(aTitSE2,{"E2_LOJA"          ,SE2->E2_LOJA           ,Nil})       
+        aadd(aTitSE2,{"E2_EMISSAO"       ,aGeraFatura[16]        ,Nil})
+        aadd(aTitSE2,{"E2_VENCTO"        ,dVencimento            ,Nil})
+        aadd(aTitSE2,{"E2_VALOR"         ,SE2->E2_VALOR          ,Nil})
+        aadd(aTitSE2,{"E2_ZZCOZZL"       ,cCodZZL                ,Nil})
+
+        lMsErroAuto := .F.
+        MsExecAuto( { |x,y,z| FINA050(x,y,z)}, aTitSE2,, 4) 
+        
+        if lMsErroAuto
+            lRet := .F.
+            aRetLog	:= GetAutoGrLog()
+            cRet    := "Geração CTE "
+            If Len(aRetLog) > 0 
+                For nErro := 1 To Len(aRetLog)
+                    cTexto := AllTrim(aRetLog[nErro])
+                    cTexto := Replace(cTexto, chr(13)+chr(10), ' | ')
+                    cTexto := Replace(cTexto, chr(10)+chr(13), ' | ')
+                    cRet += cTexto
+                Next nErro	
+            EndIf	
+            geraLog("Erro: "+cRet)
+        
+        endif
+    endif
+
+    SE2->(RestArea(aAreaSE2))
+    RestArea(aArea)
+
+Return cRet
