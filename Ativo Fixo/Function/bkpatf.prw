@@ -14,6 +14,7 @@ Chamada atraves do menu miscelanea.
 ±±³          ³         ³ a deletado ou nao; Implementado opcao restore.   ³±±
 /*/
 User Function BKPATF()
+
 	Local cTabSN1		:= ""
 	Local lEnd			:= .F.
 	Local aOpcoes		:= If(Upper(AllTrim(cUserName)) $ Upper('Administrador,Totvs'),{"Backup","Restore"},{"Backup"})

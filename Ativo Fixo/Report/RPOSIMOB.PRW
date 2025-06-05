@@ -4,6 +4,7 @@ Relatório de Posição do Ativo Imobilizado Analítico
 @author Sergio Braz
 @since 23/08/2019
 /*/
+
 User Function RPosImob
 	Private nRegs
 	If AskMe()         
